@@ -6,10 +6,12 @@ O projeto se inspira no uso de sessões do MobaXterm e do WindTerm. É um aplica
 
 ## Para usar
 
-Baixe **StanisTerminal-1.4.0-win-x64.exe** na página de [Releases](https://github.com/TiagoTStanis/StanisTerminal/releases) e abra. Ele extrai os componentes antes de iniciar e demora um pouco mais na primeira vez. Não precisa instalar Node.js, Python ou Electron. Use Windows 10/11 de 64 bits e uma pasta em que você possa salvar arquivos, como Documentos. Confira o SHA-256 e a assinatura GPG do release (veja [como verificar](docs/VERIFICAR-ASSINATURA.md); impressão digital `A345 44C3 43F2 E16B EF64  C7A4 95A1 3721 ED00 B9E6`).
+Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.5.0-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
+
+A versão de arquivo único, gerada por `pnpm build`, extrai os componentes a cada execução e pode levar mais de um minuto. Não precisa instalar Node.js, Python ou Electron em nenhuma das distribuições. Use Windows 10/11 de 64 bits e uma pasta em que você possa salvar arquivos, como Documentos. Consulte os arquivos já publicados em [Releases](https://github.com/TiagoTStanis/StanisTerminal/releases); gerar um pacote local não o publica automaticamente. Para arquivos publicados, confira o SHA-256 e a assinatura GPG do release (veja [como verificar](docs/VERIFICAR-ASSINATURA.md); impressão digital `A345 44C3 43F2 E16B EF64  C7A4 95A1 3721 ED00 B9E6`).
 
 1. Clique em **Abrir PowerShell** para trabalhar neste computador.
-2. Para acessar um servidor, clique em **Nova sessão**, escolha o protocolo e preencha nome, endereço e usuário. Salve e clique no perfil na barra lateral.
+2. Para acessar um servidor, clique em **Nova sessão**, escolha o protocolo e preencha nome, endereço e usuário. Porta, pastas, chave SSH, agente, proxy e gateway ficam em **Avançados**. Salve e clique no perfil na barra lateral.
 3. Em uma conexão SSH, abra **Arquivos → SFTP** para ver os arquivos do servidor. O botão **Enviar** escolhe um arquivo local; a seta ao lado de um arquivo remoto faz o download.
 4. Use **Dividir** para trabalhar com até quatro painéis visíveis. É possível manter até 24 sessões abertas.
 
@@ -17,7 +19,9 @@ O [manual de uso](docs/LEIA-ME.md) explica backups, X11, atalhos e mensagens com
 
 ## Recursos
 
-**Novo nesta versão:** transferência de arquivos por ZMODEM (`rz`/`sz`) sobre um canal SSH dedicado, independente do terminal interativo — funciona mesmo sem SFTP no servidor, desde que ele tenha `rz`/`sz` (pacote `lrzsz`).
+**Novo na 1.5.0:** formulário de conexão simples com opções em **Avançados**, importação do XML do mRemoteNG e revisão antes de salvar. O botão **De outro app** permite escolher um arquivo ou procurar PuTTY, OpenSSH e mRemoteNG nos locais padrão, mostrando o resultado de cada origem. A importação preserva protocolos e pastas, ignora duplicatas e não importa senhas. Veja os formatos e limites no [manual](docs/LEIA-ME.md#trazer-conexões-de-outro-programa).
+
+**Da 1.4.0:** transferência de arquivos por ZMODEM (`rz`/`sz`) sobre um canal SSH dedicado, independente do terminal interativo — funciona mesmo sem SFTP no servidor, desde que ele tenha `rz`/`sz` (pacote `lrzsz`).
 
 **Da versão anterior:** links clicáveis no terminal (com confirmação antes de abrir no navegador), proxy SOCKS5 de saída e encaminhamento do agente para a conexão SSH, varredura de portas e Wake-on-LAN, importar sessões do PuTTY e do `~/.ssh/config`, reabrir sessões ao iniciar (opcional), e senha mestra com bloqueio automático por tempo ocioso.
 
@@ -66,9 +70,11 @@ Requisitos de desenvolvimento: Windows x64, Node.js 20 ou superior, pnpm e .NET 
 | `pnpm start` | Preparar a interface e abrir o aplicativo |
 | `pnpm test` | Testar regras e operações de arquivos/rede |
 | `pnpm test:ui` | Testar a interface com PowerShell real |
+| `pnpm test:import` | Testar formulário simples/avançado e importação XML pela interface |
 | `pnpm test:connections` | Testar conexões em servidores locais descartáveis |
 | `pnpm test:portable` | Conferir abertura e PowerShell no lançador de arquivo único |
-| `pnpm build` | Gerar o executável portátil em `dist` |
+| `pnpm build` | Gerar o executável único e o ZIP para abertura rápida em `dist` |
+| `pnpm build:zip` | Gerar somente o ZIP; extraia uma vez e abra o executável interno |
 
 Para testar a distribuição extraída, defina `STANIS_TEST_EXE` com o caminho completo de `dist/win-unpacked/Stanis Terminal.exe` antes de rodar os testes de interface e conexões. Os testes usam uma pasta temporária de dados, separada dos seus perfis.
 

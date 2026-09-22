@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 (async () => {
   const root = path.resolve(__dirname, '..');
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
-  const app = await electron.launch({ executablePath: require('electron'), args: [root, '--test-mode'], env, timeout: 30000 });
+  const app = await electron.launch({ executablePath: process.env.STANIS_TEST_EXE || require('electron'), args: process.env.STANIS_TEST_EXE ? ['--test-mode'] : [root, '--test-mode'], env, timeout: 30000 });
   const page = await app.firstWindow();
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   const call = (...args) => page.evaluate(args => window.api.call(...args), args);
@@ -35,7 +35,7 @@ const assert = require('node:assert/strict');
 
     // Arrastar e soltar entre pastas + criar sessão em outra pasta por nova pasta digitada.
     await page.click('#new-session'); await page.locator('[name=name]').fill('Router'); await page.selectOption('[name=type]', 'telnet'); await page.locator('[name=host]').fill('192.168.0.1');
-    await page.locator('[name=newGroup]').fill('Lab/Rede'); await page.click('#dialog-ok'); await page.waitForSelector('.tree-name:text("Router")');
+    await page.click('#dialog-advanced summary'); await page.locator('[name=newGroup]').fill('Lab/Rede'); await page.click('#dialog-ok'); await page.waitForSelector('.tree-name:text("Router")');
     assert.equal((await cfg()).profiles.find(p => p.name === 'Router').group, 'Lab/Rede');
     await page.locator('.tree-row.session:has-text("Router")').dragTo(page.locator('.tree-row.folder:has-text("Acme")'));
     await page.waitForFunction(async () => (await window.api.call('init')).config.profiles.find(p => p.name === 'Router').group === 'Clientes/Acme');

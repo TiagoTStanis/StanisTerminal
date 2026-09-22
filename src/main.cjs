@@ -15,7 +15,7 @@ const { Transfers } = require('./transfers.cjs');
 const { Mirror } = require('./mirror.cjs');
 const { Tools } = require('./tools.cjs');
 const { Vault } = require('./vault.cjs');
-const { importPutty, importSshConfig } = require('./importers.cjs');
+const { scanImports, importFile, prepareImport } = require('./importers.cjs');
 const { uploadZmodem, downloadZmodem } = require('./zmodemio.cjs');
 const { Packages, ID: PACKAGE_ID } = require('./packages.cjs');
 const { MsysPackages, NAME: MSYS_NAME } = require('./msyspkg.cjs');
@@ -293,19 +293,19 @@ function register() {
   handle('transfer:cancel', id => transfers.cancel(id));
   handle('transfer:clear', () => transfers.clear());
   handle('transfer:list', () => transfers.list());
-  handle('import:scan', async () => {
-    const [putty, sshConfig] = await Promise.all([importPutty(), importSshConfig()]);
-    return { putty, sshConfig };
+  handle('import:scan', () => scanImports());
+  handle('import:file', async () => {
+    const result = await dialog.showOpenDialog(window, { title: 'Escolher arquivo de conexões', filters: [{ name: 'mRemoteNG XML / Stanis Terminal JSON', extensions: ['xml', 'json'] }, { name: 'OpenSSH config / todos os arquivos', extensions: ['*'] }], properties: ['openFile'] });
+    if (result.canceled) return null;
+    return importFile(result.filePaths[0]);
   });
   handle('import:apply', rows => {
-    if (!Array.isArray(rows) || rows.length > 500) throw new Error('Muitas sessões para importar de uma vez.');
-    const byName = new Map(); const saved = [];
-    for (const row of rows) {
-      const p = profile({ type: 'ssh', name: text(row.name), group: text(row.group || 'Importado'), host: row.host, port: row.port, username: row.username || '', keyPath: row.keyPath || '' });
-      byName.set(row.name, p.id); saved.push({ ...p, jumpName: row.jumpName || '' });
+    const prepared = prepareImport(rows, config.value.profiles);
+    if (prepared.added) {
+      const next = { ...config.value, profiles: prepared.profiles };
+      writeJSON(config.file, next); config.value = next;
     }
-    for (const p of saved) { if (p.jumpName && byName.has(p.jumpName)) p.jumpId = byName.get(p.jumpName); delete p.jumpName; config.putProfile(p); }
-    return config.value;
+    return { config: config.value, added: prepared.added, skipped: prepared.skipped };
   });
   handle('links:open', async url => {
     let parsed; try { parsed = new URL(text(url, 2048)); } catch { throw new Error('Endereço inválido.'); }

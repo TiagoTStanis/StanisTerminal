@@ -41,6 +41,13 @@ function showNextDialog() {
   const fields = [...(spec.fields || [])];
   if (spec.remember) fields.push({ name: 'remember', label: 'Guardar com criptografia da minha conta Windows', type: 'checkbox', wide: true });
   $('dialog-fields').replaceChildren();
+  let advancedFields;
+  if (spec.advancedFields?.length) {
+    const advanced = elem('details', '', 'advanced-options'); advanced.id = 'dialog-advanced';
+    advanced.append(elem('summary', 'Avançados'));
+    advancedFields = elem('div', '', 'advanced-grid'); advanced.append(advancedFields);
+    $('dialog-fields').append(advanced);
+  }
   for (const field of fields) {
     const label = elem('label', '', 'field' + (field.wide ? ' wide' : '') + (field.type === 'checkbox' ? ' checkbox' : ''));
     label.dataset.field = field.name;
@@ -53,13 +60,16 @@ function showNextDialog() {
     if (field.required) input.required = true;
     if (field.min !== undefined) input.min = field.min;
     if (field.max !== undefined) input.max = field.max;
-    input.autocomplete = 'off'; label.append(input); $('dialog-fields').append(label);
+    input.autocomplete = 'off'; label.append(input);
+    if (spec.advancedFields?.includes(field.name)) advancedFields.append(label);
+    else $('dialog-fields').insertBefore(label, $('dialog-advanced'));
   }
   if (spec.onChange) { $('dialog-fields').onchange = () => spec.onChange($('dialog-form')); spec.onChange($('dialog-form')); } else $('dialog-fields').onchange = null;
   $('form-dialog').showModal(); updateNativeBounds();
 }
 function finishDialog(value) { if (!currentDialog) return; if (value === null && currentDialog.spec.noCancel) return; const { resolve } = currentDialog; currentDialog = null; $('form-dialog').close(); resolve(value); showNextDialog(); updateNativeBounds(); }
 $('dialog-form').onsubmit = event => { event.preventDefault(); const value = Object.fromEntries(new FormData(event.target)); for (const check of event.target.querySelectorAll('[type=checkbox]')) value[check.name] = check.checked; finishDialog(value); };
+$('dialog-form').addEventListener('invalid', event => { const details = event.target.closest('details'); if (details) details.open = true; }, true);
 $('dialog-cancel').onclick = $('dialog-x').onclick = () => finishDialog(null);
 $('form-dialog').addEventListener('cancel', event => { event.preventDefault(); finishDialog(null); });
 api.on('question', safe(async spec => { const value = await form(spec); await call('answer', spec.id, value); }));
@@ -68,7 +78,8 @@ api.on('notice', toast);
 function localProfile(shell = 'powershell') { return { type: 'local', shell, name: { powershell: 'PowerShell', cmd: 'CMD', bash: 'Git Bash', wsl: 'WSL', busybox: 'BusyBox (Unix)', msys2: 'Unix (MSYS2)' }[shell], group: 'Local', cwd: state.home }; }
 async function sessionForm(existing = {}) {
   const type = existing.type || 'ssh';
-  const result = await form({ title: existing.id ? 'Editar sessão' : 'Nova sessão', accept: 'Salvar sessão', fields: [
+  let lastType = type;
+  const result = await form({ title: existing.id ? 'Editar sessão' : 'Nova sessão', message: 'Preencha os dados da conexão. As opções extras ficam em Avançados.', accept: 'Salvar sessão', advancedFields: ['group', 'newGroup', 'cwd', 'port', 'keyPath', 'useAgent', 'agentForward', 'proxyHost', 'proxyPort', 'jumpId'], fields: [
     { name: 'name', label: 'Nome', value: existing.name || '', required: true }, { name: 'group', label: 'Pasta', value: existing.group || 'Minhas sessões', options: [...new Set(['Minhas sessões', ...(state.config.folders || []), ...state.config.profiles.map(p => p.group)])].sort((a, b) => a.localeCompare(b)).map(f => ({ value: f, label: f })) },
     { name: 'type', label: 'Protocolo', value: type, options: [{ value: 'ssh', label: 'SSH + SFTP' }, { value: 'local', label: 'Terminal local' }, { value: 'rdp', label: 'RDP integrado' }, { value: 'vnc', label: 'VNC integrado' }, { value: 'telnet', label: 'Telnet' }, { value: 'serial', label: 'Serial (8N1)' }, { value: 'x11', label: 'Servidor X11 local' }, { value: 'ssh-x11', label: 'SSH com aplicativos X11' }, { value: 'xdmcp', label: 'Área de trabalho XDMCP' }, { value: 'rlogin', label: 'Rlogin (sem criptografia)' }, { value: 'rsh', label: 'Rsh — executar comando (sem criptografia)' }] },
     { name: 'shell', label: 'Shell local', value: existing.shell || 'powershell', options: ['powershell', 'cmd', 'bash', 'wsl', 'busybox', 'msys2'] },
@@ -87,8 +98,11 @@ async function sessionForm(existing = {}) {
     { name: 'device', label: 'Porta serial', value: existing.device || 'COM1' }, { name: 'baudRate', label: 'Velocidade (baud)', type: 'number', value: existing.baudRate || 115200 }
   ], onChange: f => {
     const selected = f.elements.type.value;
+    if (selected !== lastType) { f.elements.port.value = ''; lastType = selected; }
     const show = ['name', 'group', 'newGroup', 'type', ...(selected === 'x11' ? [] : selected === 'xdmcp' ? ['host'] : selected === 'local' ? ['shell', 'cwd'] : selected === 'serial' ? ['device', 'baudRate'] : ['ssh', 'ssh-x11'].includes(selected) ? ['host', 'port', 'username', 'password', 'keyPath', 'useAgent', 'agentForward', 'proxyHost', 'proxyPort', 'jumpId'] : selected === 'rdp' ? ['host', 'port', 'username', 'password'] : selected === 'rlogin' ? ['host', 'port', 'username'] : selected === 'rsh' ? ['host', 'port', 'username', 'command'] : ['host', 'port'])];
-    for (const field of $('dialog-fields').children) { field.hidden = !show.includes(field.dataset.field); for (const input of field.querySelectorAll('input,select')) input.disabled = field.hidden; }
+    for (const field of $('dialog-fields').querySelectorAll('[data-field]')) { field.hidden = !show.includes(field.dataset.field); for (const input of field.querySelectorAll('input,select')) input.disabled = field.hidden; }
+    f.elements.host.required = show.includes('host');
+    f.elements.command.required = selected === 'rsh';
   } });
   if (!result) return;
   const saved = await call('profile:save', { ...result, group: (result.newGroup || '').trim() || result.group, id: existing.id });
@@ -133,7 +147,7 @@ async function openSession(profile) {
         send(bytes) { let binary = ''; for (const b of new Uint8Array(bytes.buffer || bytes, bytes.byteOffset || 0, bytes.byteLength)) binary += String.fromCharCode(b); safe(() => call('graphics:write', item.id, btoa(binary)))(); },
         close() { this.readyState = 3; safe(() => call('graphics:close', item.id))(); }
       };
-      item.channel = channel; item.rfb = new RFB(item.mount, channel); item.rfb.scaleViewport = true; item.rfb.resizeSession = true;
+      item.channel = channel; item.rfb = new RFB(item.mount, channel); item.rfb.scaleViewport = true; item.rfb.resizeSession = true; item.rfb.showDotCursor = true;
       item.rfb.addEventListener('credentialsrequired', safe(async () => {
         const credentials = await form({ title: 'Autenticação VNC', fields: [{ name: 'username', label: 'Usuário (quando exigido)' }, { name: 'password', label: 'Senha', type: 'password' }] });
         if (credentials) item.rfb.sendCredentials(credentials); else await closeSession(item.id, true);
@@ -141,6 +155,12 @@ async function openSession(profile) {
       item.rfb.addEventListener('connect', () => toast('VNC conectado.'));
       item.rfb.addEventListener('disconnect', event => { item.ended = true; toast(event.detail.clean ? 'VNC desconectado.' : 'Conexão VNC interrompida.'); renderTabs(); });
       item.rfb.addEventListener('securityfailure', event => toast(event.detail.reason || 'Autenticação VNC falhou.'));
+      const bar = elem('div', '', 'graphic-toolbar');
+      bar.append(
+        button('⌨ Ctrl+Alt+Del', () => item.rfb.sendCtrlAltDel()),
+        button('⛶ Tela cheia', () => item.pane.requestFullscreen())
+      );
+      item.pane.append(bar);
       await call('graphics:activate', item.id);
     } else item.mount.append(elem('div', profile.type === 'rdp' ? 'Conectando à área de trabalho…' : 'Servidor X11 ativo. Abra uma sessão SSH com aplicativos X11 para exibir as janelas aqui.', 'graphic-message'));
   }
@@ -333,14 +353,38 @@ $('find-input').oninput = () => current()?.search?.findNext($('find-input').valu
 $('find-input').onkeydown = event => { if (event.key === 'Enter') current()?.search?.findNext(event.target.value); };
 $('log').onclick = safe(async () => { const item = current(); if (!item?.terminal) throw new Error('Selecione um terminal.'); item.logging = await call('terminal:log', item.id); renderTabs(); });
 $('reconnect').onclick = safe(async () => { const item = current(); if (item) { const p = item.profile; await closeSession(item.id); if (!sessions.has(item.id)) await openSession(p); } });
-$('import-system').onclick = safe(async () => {
-  const found = await call('import:scan'); const rows = [...found.putty, ...found.sshConfig];
-  if (!rows.length) { toast('Nenhuma sessão encontrada no PuTTY ou em ~/.ssh/config.'); return; }
-  const answer = await form({ title: `Importar ${rows.length} sessão(ões)`, message: 'Revise antes de importar. Senhas nunca são lidas nem importadas.', fields: rows.map((r, i) => ({ name: String(i), label: `${r.name} — ${r.username ? r.username + '@' : ''}${r.host}:${r.port} (${r.group})`, type: 'checkbox', value: true, wide: true })), accept: 'Importar selecionadas' });
-  if (!answer) return; const chosen = rows.filter((_, i) => answer[String(i)]);
-  if (!chosen.length) return; state.config = await call('import:apply', chosen); renderProfiles(); toast(`${chosen.length} sessão(ões) importada(s).`);
-});
-$('import-sessions').onclick = safe(async () => { const result = await call('config:import'); if (result) { state.config = result; renderProfiles(); } });
+function showImport() { if (!$('import-dialog').open) $('import-dialog').showModal(); updateNativeBounds(); }
+$('import-system').onclick = showImport;
+$('import-close').onclick = () => $('import-dialog').close();
+$('import-dialog').addEventListener('close', updateNativeBounds);
+let importing = false;
+async function importConnections(channel) {
+  if (importing) return;
+  importing = true; showImport();
+  $('import-file').disabled = $('import-scan').disabled = true;
+  $('import-status').textContent = channel === 'import:scan' ? 'Procurando conexões nos locais padrão…' : 'Escolha o arquivo exportado pelo outro aplicativo.';
+  try {
+    const found = await call(channel);
+    if (!found) { $('import-status').textContent = 'Nenhum arquivo selecionado. Você pode escolher um arquivo ou procurar neste computador.'; return; }
+    const notes = [...(found.diagnostics || []), ...(found.warnings || [])];
+    const rows = found.rows;
+    if (!rows.length) {
+      $('import-status').textContent = [...notes, 'Nenhuma conexão compatível para importar. Se o aplicativo é portátil ou usa outro local, clique em Escolher arquivo.'].join('\n');
+      return;
+    }
+    $('import-dialog').close();
+    const answer = await form({ title: `Revisar ${rows.length} conexão(ões)`, message: [found.source, 'Selecione o que deseja trazer. Senhas não são importadas; conexões já existentes serão ignoradas.', ...notes].join('\n'), fields: rows.map((r, i) => ({ name: String(i), label: `${r.name} · ${r.type.toUpperCase()} · ${r.host || r.shell || r.device || 'local'}${r.port ? ':' + r.port : ''} · ${r.group}`, type: 'checkbox', value: true, wide: true })), accept: 'Importar selecionadas' });
+    if (!answer) return;
+    const chosen = rows.filter((_, i) => answer[String(i)]);
+    if (!chosen.length) { toast('Nenhuma conexão selecionada.'); return; }
+    const result = await call('import:apply', chosen);
+    state.config = result.config; state.secrets = await call('profile:secrets'); renderProfiles();
+    toast(`${result.added} conexão(ões) importada(s).${result.skipped ? ' ' + result.skipped + ' já existente(s), sem duplicar.' : ''}`);
+  } catch (error) { showImport(); $('import-status').textContent = error.message; }
+  finally { importing = false; $('import-file').disabled = $('import-scan').disabled = false; }
+}
+$('import-scan').onclick = () => importConnections('import:scan');
+$('import-file').onclick = $('import-sessions').onclick = () => importConnections('import:file');
 document.addEventListener('keydown', event => {
   if (!event.ctrlKey || !event.shiftKey || document.querySelector('dialog[open]')) return;
   if (event.code === 'KeyT') { event.preventDefault(); safe(() => openSession(localProfile()))(); }

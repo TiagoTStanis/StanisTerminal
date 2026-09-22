@@ -11,6 +11,7 @@ A licença MIT na raiz se aplica ao código próprio do Stanis Terminal. Os comp
 | noVNC | Cliente VNC | https://github.com/novnc/noVNC |
 | basic-ftp | FTP e FTPS | https://github.com/patrickjuchli/basic-ftp |
 | serialport | Portas seriais | https://github.com/serialport/node-serialport |
+| @xmldom/xmldom | Leitura local do XML exportado pelo mRemoteNG | https://github.com/xmldom/xmldom |
 | VcXsrv 21.1.16.1 | Servidor X11, executado como processo separado | https://github.com/marchaesen/vcxsrv/releases/tag/21.1.16.1 |
 
 Os textos de licença dos pacotes estão em `docs/licencas`. A distribuição Electron também inclui `LICENSE.electron.txt` e `LICENSES.chromium.html` no aplicativo extraído.

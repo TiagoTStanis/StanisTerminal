@@ -1,6 +1,6 @@
 {
   "name": "stanis-terminal",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Terminal local para Windows, sem IA, com sessões e ferramentas de infraestrutura.",
   "main": "src/main.cjs",
   "author": "Tiago Torres Stanis",
@@ -11,7 +11,9 @@
     "prepare:app": "node scripts/prepare.cjs",
     "test": "node --openssl-legacy-provider --test tests/*.test.cjs tests/*.test.mjs",
     "test:ui": "node tests/smoke.cjs",
-    "build": "node scripts/prepare.cjs && electron-builder --win portable --x64",
+    "test:import": "node tests/import-ui.cjs",
+    "build": "node scripts/prepare.cjs && electron-builder --win portable zip --x64",
+    "build:zip": "node scripts/prepare.cjs && electron-builder --win zip --x64",
     "build:dir": "node scripts/prepare.cjs && electron-builder --win --dir --x64",
     "test:connections": "node tests/connections.cjs",
     "test:extras": "node tests/extras.cjs",
@@ -23,6 +25,7 @@
   },
   "dependencies": {
     "@novnc/novnc": "1.7.0",
+    "@xmldom/xmldom": "0.8.15",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/addon-search": "0.16.0",
     "@xterm/addon-web-links": "0.12.0",
@@ -95,8 +98,10 @@
     ],
     "win": {
       "target": [
-        "portable"
+        "portable",
+        "zip"
       ],
+      "artifactName": "StanisTerminal-${version}-win-${arch}.${ext}",
       "icon": "src/ui/icon.ico",
       "signExecutable": false
     },

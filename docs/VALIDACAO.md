@@ -1,4 +1,4 @@
-# Validação da versão 1.4.0
+# Validação da versão 1.5.0
 
 Ambiente: Windows x64 desta máquina. Os testes de conexão usam servidores temporários em `127.0.0.1`; nenhum servidor da empresa é acessado.
 
@@ -45,6 +45,15 @@ Rode `pnpm test`, `pnpm test:ui`, `pnpm test:extras`, `pnpm test:organize`, `pnp
 - Proteções testadas: recusa de sobrescrever arquivo existente no destino, nome de arquivo remoto com travessia de caminho (`../../`) contido na pasta de destino, limite de 2 GiB por transferência, e erro claro quando o comando remoto não fala ZMODEM (em vez de travar).
 
 Rode `pnpm test:zmodem` para o teste de ponta a ponta (não precisa de rede; usa um servidor SSH local).
+
+## Novidades da 1.5.0: validação local em 22/09/2026
+
+- Formulário simples com opções avançadas recolhidas; criação SSH/RDP com portas padrão e edição sem perder chave, porta, agente e pasta ao fechar Avançados.
+- XML do mRemoteNG: pastas, herança, domínio RDP, protocolos preservados, entidades XML, UTF-8/UTF-16, arquivos vazios/inválidos/cifrados, limites e recusa de DTD. Senhas não aparecem na revisão nem na configuração salva.
+- Importação pela interface com arquivo de laboratório: revisão, cancelar sem gravar, seleção, persistência, duplicatas, lote inválido sem gravação parcial e mensagens de erro. Apenas o seletor nativo de arquivo é substituído no teste; parser, IPC e persistência são reais.
+- Compatibilidade estrutural com o arquivo de exemplo `confCons_v2_6.xml` do repositório oficial mRemoteNG: as 12 conexões foram lidas ao substituir seus hosts originalmente vazios por um host fictício. O arquivo original é rejeitado por não ter destinos válidos; isso não é um teste dos arquivos pessoais do usuário.
+- PuTTY: testes com saída de Registro simulada para protocolos, nomes escapados e erros de acesso. OpenSSH: múltiplos aliases e sintaxe chave=valor. A busca real não encontrou sessões nos caminhos padrão desta máquina.
+- Suíte de regras: 73 testes passaram, 1 teste de servidor VNC real ficou marcado como não executado. Scripts de interface: `tests/import-ui.cjs`, `tests/organize.cjs` e `tests/smoke.cjs`.
 
 ## Não verificado nesta máquina
 

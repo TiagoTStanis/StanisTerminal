@@ -1,8 +1,10 @@
 # Comece por aqui
 
-Para abrir mais rápido, use **Stanis Terminal.exe** na pasta **StanisTerminal** da entrega, ou o atalho na Área de Trabalho. Essa pasta já contém todos os componentes; mantenha os arquivos juntos.
+Para abrir mais rápido, extraia **StanisTerminal-1.5.0-win-x64.zip** uma vez para uma pasta local e use **Stanis Terminal.exe** dentro dela, ou crie um atalho para ele na Área de Trabalho. Essa pasta já contém todos os componentes; mantenha os arquivos juntos. Na entrega local atual, o atalho usa `release/StanisTerminal-1.5.0/Stanis Terminal.exe`.
 
-Também há a versão de arquivo único **StanisTerminal-1.4.0-win-x64.exe**. Ela extrai os componentes antes de abrir e pode levar cerca de um minuto nesta máquina. Deixe o programa em uma pasta sua, como Documentos, com espaço livre e permissão de escrita.
+Também é possível gerar a versão de arquivo único com `pnpm build`. Ela extrai os componentes a cada execução e pode levar mais de um minuto nesta máquina. Deixe o programa em uma pasta sua, como Documentos, com espaço livre e permissão de escrita.
+
+Se já tiver sessões salvas em outra cópia, feche o programa e copie a pasta **StanisTerminal-data** dessa cópia para junto do novo executável. Guarde a pasta original como backup e não sobrescreva uma pasta de dados existente sem comparar seu conteúdo.
 
 ## Minha primeira conexão
 
@@ -10,7 +12,21 @@ Em **Nova sessão**, dê um nome fácil de reconhecer, como “Laboratório Linu
 
 Na primeira conexão SSH aparece a impressão digital da chave do servidor. Compare com a chave informada pelo administrador antes de confiar. Nas próximas conexões, o programa verifica a chave salva. Se ela mudar, a conexão será bloqueada até você esclarecer a mudança.
 
-Uma chave privada pode ser escolhida pelo caminho completo no perfil. A frase secreta é solicitada na conexão. Para usar um servidor de entrada, salve primeiro o perfil dele e depois escolha esse perfil em **Gateway SSH**.
+Em **Avançados**, ajuste a porta, a pasta de organização ou o caminho completo da chave privada. A frase secreta é solicitada na conexão. Para usar um servidor de entrada, salve primeiro o perfil dele e depois escolha esse perfil em **Avançados → Gateway SSH**. Fechar Avançados não apaga os valores preenchidos.
+
+## Trazer conexões de outro programa
+
+1. No mRemoteNG, use **File → Export to file**, escolha **XML** e exporte a pasta ou todas as conexões. Exporte sem senhas; não ative a criptografia do arquivo inteiro. Veja as [opções oficiais de exportação](https://mremoteng.readthedocs.io/en/latest/user_interface/import_export.html).
+2. No Stanis Terminal, clique em **Importar arquivo** e escolha o XML. Também pode usar **De outro app → Escolher arquivo**.
+3. Revise a lista, desmarque o que não quiser e clique em **Importar selecionadas**. Nada é salvo antes dessa confirmação. Reimportar as mesmas conexões não cria cópias.
+
+O XML preserva pastas e subpastas, nome, host, porta e usuário. Entende RDP, SSH/SSH2, VNC, Telnet e Rlogin, inclusive usuário/domínio, protocolo e porta herdados de uma pasta. Senhas são ignoradas, mesmo se estiverem no arquivo. Protocolos incompatíveis e registros inválidos são informados na revisão. Gateway RDP, preferências visuais e personalizações de sessões externas do PuTTY não são reproduzidos.
+
+**Procurar neste computador** consulta o PuTTY no Registro da conta atual, `~/.ssh/config` e `confCons.xml` nas pastas mRemoteNG de AppData/Roaming e AppData/Local. Se não encontrar nada, isso não significa que o outro programa não tenha conexões: instalações portáteis e caminhos personalizados precisam de **Escolher arquivo**. A busca informa falhas de leitura separadamente.
+
+Também são aceitos JSON de sessões do Stanis Terminal e arquivos `config` do OpenSSH. No OpenSSH, apenas blocos Host explícitos são importados: Include, Match, curingas e ProxyCommand não são aplicados. Selecione também o gateway usado por um ProxyJump. Chaves `.ppk` do PuTTY podem exigir conversão para OpenSSH antes da conexão.
+
+Limites: 500 conexões por importação, arquivo de até 5 MiB (OpenSSH: 2 MiB), pastas com até seis níveis e nomes de até 60 caracteres. Dados fora dos limites aparecem como ignorados. O arquivo original não é alterado; esta operação não abre conexões com os servidores.
 
 ## Terminais e arquivos
 
