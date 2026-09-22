@@ -72,8 +72,10 @@ class RdpHost : Form {
                 // autoassinado. Nível 1 (exigir sucesso) travava a conexão sem aviso nesses casos.
                 advanced.AuthenticationLevel = 2;
                 advanced.SmartSizing = true;
-                advanced.RedirectClipboard = false;
-                advanced.RedirectDrives = false;
+                // Canais virtuais oficiais do RDP (mesmo mecanismo usado por qualquer área de trabalho remota
+                // corporativa): não afetam login nem outras sessões, só habilitam esses dois recursos.
+                advanced.RedirectClipboard = true; // Copiar/colar texto e arquivos (Explorer) entre local e remoto.
+                advanced.RedirectDrives = true; // Unidades locais aparecem como \\tsclient\ dentro da sessão remota.
                 advanced.ClearTextPassword = Convert.ToString(p["password"]);
                 c.Connect(); Emit("connecting", "Conectando ao servidor RDP");
                 // O controle não expõe eventos aqui (sem wrapper de interop gerado), então observamos

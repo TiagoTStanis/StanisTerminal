@@ -6,7 +6,7 @@ O projeto se inspira no uso de sessões do MobaXterm e do WindTerm. É um aplica
 
 ## Para usar
 
-Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.6.1-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
+Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.6.2-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
 
 **Evite a versão de arquivo único** (`StanisTerminal-*-win-x64-PORTATIL-LENTO-usar-o-zip.exe`): ela extrai os componentes a cada execução — não só na primeira — e pode levar mais de um minuto toda vez que você abrir. Use-a apenas para testar rapidamente em um computador onde você não vai instalar nada; para uso do dia a dia, use sempre o ZIP extraído. Não precisa instalar Node.js, Python ou Electron em nenhuma das distribuições. Use Windows 10/11 de 64 bits e uma pasta em que você possa salvar arquivos, como Documentos. Consulte os arquivos já publicados em [Releases](https://github.com/TiagoTStanis/StanisTerminal/releases); gerar um pacote local não o publica automaticamente. Para arquivos publicados, confira o SHA-256 e a assinatura GPG do release (veja [como verificar](docs/VERIFICAR-ASSINATURA.md); impressão digital `A345 44C3 43F2 E16B EF64  C7A4 95A1 3721 ED00 B9E6`).
 
@@ -19,7 +19,12 @@ O [manual de uso](docs/LEIA-ME.md) explica backups, X11, atalhos e mensagens com
 
 ## Recursos
 
-**Novo na 1.6.1 (correções):**
+**Novo na 1.6.2:**
+- **Transferência de arquivos e clipboard no RDP sem precisar do compartilhamento C$:** o controle agora liga os dois canais virtuais oficiais do RDP — `RedirectClipboard` (copiar/colar texto e arquivos entre local e remoto, direto no Explorer) e `RedirectDrives` (suas unidades locais aparecem como `\\tsclient\` dentro da sessão remota). É o mesmo mecanismo usado por qualquer área de trabalho remota corporativa (e, por baixo dos panos, pelo próprio RustDesk para RDP) — não afeta login nem outras sessões conectadas ao servidor. A aba **Rede** continua existindo como alternativa (útil para VNC, que não tem esse recurso no protocolo).
+- **Prompt colorido** nos terminais locais (PowerShell, cmd, bash/WSL/MSYS2): usuário, host e pasta atual em cores, no estilo MobaXterm. Pode ser desligado em Preferências.
+- **Destaque automático de erros e avisos** na saída do terminal: palavras como "error"/"erro", "failed"/"falhou" e "warning"/"aviso" ficam coloridas automaticamente, mesmo em comandos que não colorem a própria saída. Pode ser desligado em Preferências.
+
+**Da 1.6.1 (correções):**
 - **RDP travando sem tela e sem aviso:** o controle exigia que o certificado do servidor fosse validado por uma autoridade confiável (`AuthenticationLevel = 1`); como a maioria dos servidores domésticos/administrativos usa certificado autoassinado, a conexão nunca prosseguia e nada era avisado. Agora tenta autenticar mas permite prosseguir (`AuthenticationLevel = 2`, igual ao mstsc padrão), e um monitor de conexão avisa com uma mensagem clara (e encerra a aba) se a conexão falhar ou expirar em vez de ficar travada.
 - **VNC dando erro sem nunca pedir senha:** quando o servidor exige um tipo de autenticação (ex.: MS-Logon do UltraVNC, RSA-AES) e a negociação falha antes da etapa de senha, o app agora mostra o motivo técnico retornado pelo servidor em vez de uma mensagem genérica — ajuda a identificar se é incompatibilidade de protocolo ou outra causa.
 

@@ -113,7 +113,9 @@ function register() {
   handle('settings:save', value => {
     const previous = config.value.settings || {};
     config.value.settings = { fontSize: Math.max(10, Math.min(28, Number(value.fontSize) || 14)), theme: THEMES.includes(value.theme) ? value.theme : 'light', restoreSessions: value.restoreSessions === undefined ? previous.restoreSessions === true : !!value.restoreSessions, scrollback: Math.max(1000, Math.min(100000, Number(value.scrollback) || 10000)),
-      syncFolder: value.syncFolder === undefined ? previous.syncFolder || '' : text(value.syncFolder || '', 2048), autocomplete: value.autocomplete === undefined ? previous.autocomplete !== false : !!value.autocomplete };
+      syncFolder: value.syncFolder === undefined ? previous.syncFolder || '' : text(value.syncFolder || '', 2048), autocomplete: value.autocomplete === undefined ? previous.autocomplete !== false : !!value.autocomplete,
+      highlightErrors: value.highlightErrors === undefined ? previous.highlightErrors !== false : !!value.highlightErrors,
+      coloredPrompt: value.coloredPrompt === undefined ? previous.coloredPrompt !== false : !!value.coloredPrompt };
     config.save(); return config.value.settings;
   });
   handle('macros:save', values => {

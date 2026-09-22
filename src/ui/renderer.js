@@ -151,6 +151,7 @@ async function openSession(profile) {
     // Intercepta colagem nativa para evitar executar várias linhas sem revisão.
     mount.addEventListener('paste', event => { event.preventDefault(); event.stopPropagation(); safe(() => paste(item, event.clipboardData.getData('text/plain')))(); }, true);
     await call('terminal:activate', item.id);
+    if (profile.type === 'local' && state.config.settings.coloredPrompt !== false) { const promptCommand = coloredPromptCommand(profile.shell); if (promptCommand) safe(() => call('terminal:write', item.id, promptCommand))(); }
   } else {
     item.mount = elem('div', '', 'graphic-mount'); item.pane.append(item.mount);
     if (profile.type === 'vnc') {
@@ -231,7 +232,19 @@ function updateNativeBounds() {
     safe(() => call('graphics:bounds', item.id, { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, visible: !item.pane.hidden && !modal }))();
   }
 }
-api.on('terminal:data', ({ id, data }) => { const item = sessions.get(id); if (item?.terminal) { item.terminal.write(data); extras?.output(item, data); } });
+function coloredPromptCommand(shell) {
+  if (shell === 'powershell') return 'function prompt { $e=[char]27; "$e[36m$env:USERNAME$e[0m@$e[33m$env:COMPUTERNAME$e[0m $e[32m$($PWD.Path)$e[0m> " }\r';
+  if (shell === 'cmd') return 'prompt $E[36m%USERNAME%$E[0m@$E[33m%COMPUTERNAME%$E[0m $E[32m$P$E[0m$G\r';
+  if (['bash', 'wsl', 'msys2', 'busybox'].includes(shell)) return String.raw`export PS1='\[\e[36m\]\u\[\e[0m\]@\[\e[33m\]\h\[\e[0m\] \[\e[32m\]\w\[\e[0m\]\$ '` + '\r';
+  return '';
+}
+const HIGHLIGHT_ERROR = /\b(error|erro|failed|falhou|fatal|exception|panic)\b/gi;
+const HIGHLIGHT_WARNING = /\b(warning|warn|aviso|atenção|deprecated)\b/gi;
+function highlightOutput(data) {
+  if (!state.config.settings.highlightErrors) return data;
+  return data.replace(HIGHLIGHT_ERROR, m => `\x1b[91m${m}\x1b[0m`).replace(HIGHLIGHT_WARNING, m => `\x1b[93m${m}\x1b[0m`);
+}
+api.on('terminal:data', ({ id, data }) => { const item = sessions.get(id); if (item?.terminal) { item.terminal.write(highlightOutput(data)); extras?.output(item, data); } });
 api.on('terminal:exit', ({ id, code }) => { const item = sessions.get(id); if (item) { item.ended = true; item.terminal.writeln(`\r\n\x1b[90m[Sessão encerrada: ${code}]\x1b[0m`); renderTabs(); } });
 api.on('graphics:data', ({ id, data }) => { const item = sessions.get(id); if (item?.channel) item.channel.onmessage?.({ data: Uint8Array.from(atob(data), char => char.charCodeAt(0)).buffer }); });
 api.on('graphics:state', ({ id, type, message }) => {
@@ -353,6 +366,8 @@ $('tools-dialog').addEventListener('close', updateNativeBounds);
 $('settings').onclick = safe(async () => {
   const lock = await call('lock:status');
   const values = await form({ title: 'Preferências', message: 'Dados locais: ' + state.dataPath, fields: [{ name: 'fontSize', label: 'Fonte do terminal', type: 'number', value: state.config.settings.fontSize, min: 10, max: 28 }, { name: 'theme', label: 'Tema', value: state.config.settings.theme, options: [{ value: 'dark', label: 'Escuro' }, { value: 'light', label: 'Claro' }, { value: 'dracula', label: 'Dracula' }, { value: 'nord', label: 'Nord' }, { value: 'solarized', label: 'Solarized escuro' }, { value: 'monokai', label: 'Monokai' }] }, { name: 'scrollback', label: 'Linhas no histórico', type: 'number', value: state.config.settings.scrollback }, { name: 'syncFolder', label: 'Pasta de sincronização (OneDrive, Dropbox, repositório Git…)', value: state.config.settings.syncFolder || '', wide: true }, { name: 'autocomplete', label: 'Sugerir comandos do histórico enquanto digito', type: 'checkbox', value: state.config.settings.autocomplete !== false, wide: true }, { name: 'restoreSessions', label: 'Reabrir as sessões ao iniciar o aplicativo', type: 'checkbox', value: !!state.config.settings.restoreSessions, wide: true },
+    { name: 'highlightErrors', label: 'Destacar "error"/"erro", "failed"/"falhou" e "warning"/"aviso" automaticamente na saída do terminal', type: 'checkbox', value: state.config.settings.highlightErrors !== false, wide: true },
+    { name: 'coloredPrompt', label: 'Usar um prompt colorido (usuário@host:pasta) nos terminais locais novos', type: 'checkbox', value: state.config.settings.coloredPrompt !== false, wide: true },
     { name: 'lockPassword', label: lock.enabled ? 'Trocar a senha mestra (deixe vazio para manter; “remover” abaixo tira a proteção)' : 'Definir senha mestra (bloqueia a lista de sessões ao abrir o app)', type: 'password', wide: true },
     { name: 'autoLockMinutes', label: 'Bloquear automaticamente após (minutos, 0 = nunca)', type: 'number', value: lock.autoLockMinutes || 15, min: 0, max: 180 },
     ...(lock.enabled ? [{ name: 'removeLock', label: 'Remover a senha mestra (pede a senha atual)', type: 'checkbox', wide: true }] : []),
