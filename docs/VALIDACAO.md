@@ -1,4 +1,4 @@
-# Validação da versão 1.3.0
+# Validação da versão 1.4.0
 
 Ambiente: Windows x64 desta máquina. Os testes de conexão usam servidores temporários em `127.0.0.1`; nenhum servidor da empresa é acessado.
 
@@ -36,6 +36,15 @@ Rode `pnpm test`, `pnpm test:ui`, `pnpm test:extras`, `pnpm test:organize`, `pnp
 - Varredura de portas (TCP connect) e Wake-on-LAN: testados contra um servidor TCP real e conferindo a estrutura exata do pacote mágico UDP.
 - Importar sessões do `~/.ssh/config` (Host, HostName, User, Port, IdentityFile, ProxyJump): testado com arquivo real, incluindo resolução do ProxyJump e limite de tamanho. A leitura do PuTTY (registro do Windows) foi testada apenas quanto a não quebrar quando não há sessões salvas (não havia PuTTY instalado nesta máquina).
 - Reabrir sessões ao iniciar (opcional) e senha mestra com bloqueio automático: testados de ponta a ponta pela interface real, incluindo reinício completo do processo do aplicativo, tentativa de senha errada, Escape não contornando o bloqueio, e remoção da senha exigindo a senha atual.
+
+## Novidades da 1.4.0: o que foi testado
+
+- Transferência ZMODEM (`rz`/`sz`) sobre um canal SSH dedicado (`client.exec`), independente do terminal interativo — o canal do `ssh2` é binário de ponta a ponta, então não passa pelo `StringDecoder` UTF-8 que corromperia dados binários.
+- Teste de interoperabilidade: um servidor SSH real cuja contraparte fala ZMODEM com a própria biblioteca `zmodem.js` (papéis de `rz` e `sz`), provando que a implementação troca cabeçalhos e dados corretamente com uma implementação real e independente da nossa integração.
+- Teste de ponta a ponta pela interface real: sessão SSH real, clique nos botões "Enviar por ZMODEM" e "Baixar por ZMODEM", com os diálogos nativos de arquivo substituídos apenas no processo de teste; conteúdo binário (30–70 KB, aleatório) conferido byte a byte nos dois sentidos.
+- Proteções testadas: recusa de sobrescrever arquivo existente no destino, nome de arquivo remoto com travessia de caminho (`../../`) contido na pasta de destino, limite de 2 GiB por transferência, e erro claro quando o comando remoto não fala ZMODEM (em vez de travar).
+
+Rode `pnpm test:zmodem` para o teste de ponta a ponta (não precisa de rede; usa um servidor SSH local).
 
 ## Não verificado nesta máquina
 

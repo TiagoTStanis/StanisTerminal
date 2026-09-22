@@ -244,6 +244,18 @@ export function setup(ctx) {
     const result = await form({ title: 'Espelho por SFTP', message: 'Depois você escolhe a pasta local. Arquivos novos e alterados são enviados sozinhos. Nada é apagado no servidor e arquivos mais novos lá não são sobrescritos.', fields: [{ name: 'session', label: 'Sessão', options, wide: true }, { name: 'remote', label: 'Pasta remota (caminho absoluto)', value: '/tmp/espelho', required: true, wide: true }], accept: 'Escolher pasta local' });
     if (result) return call('mirror:start', result);
   });
+  tool('Enviar por ZMODEM (rz)', 'Canal SSH dedicado; não passa pelo terminal', async () => {
+    const options = sshSessions(); if (!options.length) throw new Error('Abra uma sessão SSH primeiro.');
+    const result = await form({ title: 'Enviar por ZMODEM', message: 'O servidor precisa ter “rz” (pacote lrzsz) instalado. Abre um canal separado da conexão; a sessão interativa continua livre.', fields: [{ name: 'session', label: 'Sessão', options, wide: true }], accept: 'Escolher arquivo' });
+    if (!result) return; toast('Enviando…'); const sent = await call('zmodem:upload', result.session);
+    return sent ? `Enviado: ${sent.file} (${sent.bytes} bytes).` : undefined;
+  });
+  tool('Baixar por ZMODEM (sz)', 'Canal SSH dedicado; não passa pelo terminal', async () => {
+    const options = sshSessions(); if (!options.length) throw new Error('Abra uma sessão SSH primeiro.');
+    const result = await form({ title: 'Baixar por ZMODEM', message: 'Informe o comando que o servidor deve executar (ex.: sz caminho/arquivo.log).', fields: [{ name: 'session', label: 'Sessão', options, wide: true }, { name: 'command', label: 'Comando remoto', value: 'sz ', required: true, wide: true }], accept: 'Escolher pasta de destino' });
+    if (!result) return; toast('Baixando…'); const received = await call('zmodem:download', result.session, result.command);
+    return received ? `Salvo: ${received.file} (${received.bytes} bytes).` : undefined;
+  });
   tool('Servidor VNC (compartilhar esta tela)', 'TightVNC preso a 127.0.0.1; senha opcional', async () => {
     const result = await form({ title: 'Servidor VNC local', message: 'Escuta somente em 127.0.0.1: nada fica exposto na rede. Para outro computador ver a tela, use “Túnel SSH remoto” apontando para esta porta. Sem senha, qualquer programa desta conta Windows pode se conectar.', fields: [{ name: 'port', label: 'Porta local', type: 'number', value: 5900, min: 1024, max: 65535 }, { name: 'password', label: 'Senha (opcional, até 8 caracteres)', type: 'password' }], accept: 'Iniciar' });
     if (!result) return; const started = await call('vnc:start', result);
@@ -262,7 +274,7 @@ export function setup(ctx) {
   // Agrupa as ferramentas por categoria, com um título antes de cada grupo.
   const GROUPS = [
     ['Diagnóstico', ['Ping', 'Consulta DNS', 'Traceroute', 'Teste TCP', 'Portas seriais', 'SHA-256', 'Varredura de portas', 'Wake-on-LAN']],
-    ['Túneis e espelho', ['Túnel SSH local', 'Proxy SOCKS5 (ssh -D)', 'Túnel SSH remoto (ssh -R)', 'Espelhar pasta (local → servidor)']],
+    ['Túneis e espelho', ['Túnel SSH local', 'Proxy SOCKS5 (ssh -D)', 'Túnel SSH remoto (ssh -R)', 'Espelhar pasta (local → servidor)', 'Enviar por ZMODEM (rz)', 'Baixar por ZMODEM (sz)']],
     ['Servidores locais', ['Servidor HTTP local', 'Servidor TFTP', 'Servidor FTP', 'Servidor SFTP', 'Servidor VNC (compartilhar esta tela)']],
     ['Chaves e sessões', ['Gerar chave SSH', 'Exportar sessões', 'Importar sessões', 'Sincronizar (enviar)', 'Sincronizar (receber)']],
     ['Sistema', ['Ferramentas verificadas', 'Ajuda rápida']]

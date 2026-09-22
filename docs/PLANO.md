@@ -1,9 +1,12 @@
 # Plano: fechar as lacunas de `docs/COMPARACAO.md`
 
+## Feito na 1.4.0
+
+5. **X/Y/ZMODEM** — feito, com uma solução diferente da originalmente cogitada (ver histórico abaixo): em vez de mexer no canal de dados do terminal interativo, a transferência roda sobre um **canal SSH separado** (`client.exec` de `rz`/`sz`), que já é binário de ponta a ponta. Testado com um servidor SSH real e interoperabilidade confirmada contra a própria `zmodem.js` fazendo o papel do outro lado, além de teste completo pela interface (enviar e baixar, conteúdo binário íntegro).
+
 ## Feito na 1.2.0 / 1.3.0
 1. ~~Autocompletar/histórico~~ — já existia (sugestões do histórico).
 2. **Links clicáveis** — `@xterm/addon-web-links` (MIT), com confirmação antes de abrir no navegador. Feito e testado.
-5. ~~X/Y/ZMODEM~~ — avaliado e **adiado por motivo técnico**, veja abaixo.
 6. **Proxy SOCKS5 para a própria conexão SSH** — pacote `socks` (MIT). Feito e testado com servidor SOCKS5 + SSH reais.
 8. **Varredura de portas e Wake-on-LAN** — feito e testado (TCP connect scan; pacote mágico UDP).
 9. **Senha mestra / bloqueio de tela** — feito e testado de ponta a ponta (scrypt local, bloqueio automático por tempo ocioso, sem depender de recarregar a página).
@@ -13,7 +16,7 @@
 
 ## Adiado, com o motivo
 
-- **X/Y/ZMODEM (`zmodem.js`)**: exigiria um canal de dados binário seguro entre o processo principal e a interface. Hoje esse canal (`terminal:data`, SSH/serial → interface) passa por `StringDecoder('utf8')` e por IPC como texto JavaScript; qualquer sequência ZMODEM que não seja UTF-8 válido seria corrompida antes de chegar à interface. Implementar direito exige um canal paralelo binário (por exemplo, `ArrayBuffer` por IPC ou uma codificação base64 dedicada) para todos os tipos de sessão que usam esse caminho (SSH, serial, Telnet, Rlogin/Rsh), o que é uma mudança de arquitetura, não um recurso isolado. Registrado aqui para uma versão futura dedicada a isso.
+- **X/Y/ZMODEM pelo próprio terminal interativo**: continua fora de cogitação. O canal `terminal:data` (SSH/serial → interface) passa por `StringDecoder('utf8')` e por IPC como texto JavaScript; qualquer sequência ZMODEM que não seja UTF-8 válido seria corrompida ali. Em vez de refazer esse canal (mudança de arquitetura, arriscada para todos os tipos de sessão), o ZMODEM foi implementado sobre um **canal SSH dedicado** (`src/zmodemio.cjs`), que não tem esse problema porque nunca passa pelo `StringDecoder`. Essa via só funciona para sessões SSH — Telnet, serial e Rlogin/Rsh continuam sem ZMODEM, porque são um único fluxo sem como abrir um segundo canal.
 - **ProxyCommand (WindTerm/OpenSSH)**: deliberadamente não implementado. É execução de um comando arbitrário definido no perfil; abrir essa porta contradiz o modelo de segurança do app (nenhuma execução de processo local a partir de um campo de configuração). O proxy SOCKS5 cobre o caso de uso mais comum (conectar através de um proxy) sem esse risco.
 - **SCP**: não implementado como protocolo separado porque o SFTP (já suportado) cobre o mesmo caso de uso com mais recursos (listagem, edição). Documentado como decisão, não como lacuna.
 

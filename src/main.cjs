@@ -16,6 +16,7 @@ const { Mirror } = require('./mirror.cjs');
 const { Tools } = require('./tools.cjs');
 const { Vault } = require('./vault.cjs');
 const { importPutty, importSshConfig } = require('./importers.cjs');
+const { uploadZmodem, downloadZmodem } = require('./zmodemio.cjs');
 const { Packages, ID: PACKAGE_ID } = require('./packages.cjs');
 const { MsysPackages, NAME: MSYS_NAME } = require('./msyspkg.cjs');
 const { execFile } = require('node:child_process');
@@ -209,6 +210,19 @@ function register() {
   handle('files:write', (kind, id, filename, content) => files.write(kind, id, text(filename, 4096), content));
   handle('files:change', (kind, id, action, filename, destination) => files.change(kind, id, action, text(filename, 4096), destination ? text(destination, 4096) : undefined));
   handle('files:ftp', options => files.ftpConnect(options));
+  // ZMODEM sobre um canal SSH dedicado (client.exec de rz/sz), independente do terminal interativo.
+  const sshClientOf = id => { const item = terminals.get(id); if (!item.client || item.ended) throw new Error('Selecione uma sessão SSH ativa.'); return item.client; };
+  handle('zmodem:upload', async id => {
+    const client = sshClientOf(id); const result = await dialog.showOpenDialog(window, { properties: ['openFile'] }); if (result.canceled) return null;
+    const onProgress = (sent, total) => emit('zmodem:progress', { id, direction: 'upload', sent, total });
+    const info = await uploadZmodem(client, result.filePaths[0], { onProgress }); return { file: info.file, bytes: info.bytes };
+  });
+  handle('zmodem:download', async (id, remoteCommand) => {
+    const client = sshClientOf(id); const command = text(remoteCommand, 4096); if (!command.trim()) throw new Error('Informe o comando remoto (ex.: sz arquivo.log).');
+    const result = await dialog.showOpenDialog(window, { properties: ['openDirectory'] }); if (result.canceled) return null;
+    const onProgress = (received, total) => emit('zmodem:progress', { id, direction: 'download', received, total });
+    const info = await downloadZmodem(client, command, result.filePaths[0], { onProgress }); return { file: info.file, bytes: info.bytes };
+  });
   handle('files:transfer', async (kind, id, direction, remote) => {
     let result, local;
     if (direction === 'upload') {

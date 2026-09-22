@@ -1,6 +1,6 @@
 {
   "name": "stanis-terminal",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Terminal local para Windows, sem IA, com sessões e ferramentas de infraestrutura.",
   "main": "src/main.cjs",
   "author": "Tiago Torres Stanis",
@@ -17,7 +17,9 @@
     "test:extras": "node tests/extras.cjs",
     "test:portable": "node tests/portable.cjs",
     "test:organize": "node tests/organize.cjs",
-    "test:vault": "electron tests/vault-electron.cjs"
+    "test:vault": "electron tests/vault-electron.cjs",
+    "test:zmodem": "node tests/zmodem-ui.cjs",
+    "test:lock": "node tests/lock-ui.cjs"
   },
   "dependencies": {
     "@novnc/novnc": "1.7.0",
@@ -30,7 +32,8 @@
     "node-pty": "1.1.0",
     "serialport": "13.0.0",
     "socks": "2.8.10",
-    "ssh2": "1.17.0"
+    "ssh2": "1.17.0",
+    "zmodem.js": "0.1.10"
   },
   "devDependencies": {
     "7zip-bin": "5.2.0",

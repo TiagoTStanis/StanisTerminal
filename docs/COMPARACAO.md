@@ -22,7 +22,8 @@ Legenda: ✅ tem · 🟡 parcial · ❌ não tem · ➖ não se aplica · **?** 
 | XDMCP / servidor X11 | ✅ (VcXsrv) | ✅ | 🟡 (só X11 forwarding) |
 | FTP / FTPS / SFTP | ✅ | ✅ | SFTP |
 | SCP | ❌ (decisão: SFTP já cobre o caso de uso) | ✅ | ✅ |
-| XMODEM / YMODEM / ZMODEM | ❌ (exige canal binário; ver `docs/PLANO.md`) | ? | ✅ |
+| ZMODEM (rz/sz) | ✅ (canal SSH dedicado; testado com servidor real) | ? | ✅ |
+| XMODEM / YMODEM | ❌ | ? | ✅ |
 | Túneis local / remoto / dinâmico | ✅ | ✅ | ✅ |
 | tmux integrado | ❌ | ? | ✅ |
 
