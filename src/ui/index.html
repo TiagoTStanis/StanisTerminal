@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Stanis Terminal</title>
+  <link rel="stylesheet" href="vendor/xterm.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo">&gt;_</span><strong>Stanis Terminal</strong></div>
+    <nav><button id="new-session" class="primary">＋ Nova sessão</button><div class="quick"><select id="quick-type" aria-label="Protocolo"><option value="rdp">RDP</option><option value="ssh">SSH</option><option value="vnc">VNC</option><option value="telnet">Telnet</option></select><input id="quick-input" placeholder="usuario@servidor" aria-label="Conexão rápida" spellcheck="false"><button id="quick-go" title="Conectar">→</button></div><button id="local-shell">Terminal local</button><button id="toggle-files">Arquivos</button><button id="open-packages">Pacotes</button><button id="open-tools">Ferramentas</button></nav>
+    <div class="local-badge" title="Sem telemetria, sem conta e sem nuvem"><span></span> Somente local</div><button id="settings" class="icon" title="Preferências">⚙</button>
+  </header>
+  <div class="app-layout">
+    <aside class="sidebar">
+      <div class="section-title">Sessões <span class="section-actions"><button id="new-folder" title="Nova pasta">＋ Pasta</button><button id="import-sessions" title="Importar sessões">Importar</button></span></div>
+      <input id="filter-sessions" class="search" placeholder="Filtrar sessões…" aria-label="Filtrar sessões">
+      <div id="sessions-list"></div>
+      <div class="sidebar-bottom"><span>Comandos rápidos</span><button id="add-snippet" title="Criar comando rápido">＋</button></div>
+      <div id="snippets"></div>
+      <div class="sidebar-hint">Ctrl + Shift + T <span>novo terminal</span><br>Ctrl + Shift + F <span>buscar saída</span></div>
+    </aside>
+    <main>
+      <div class="tabbar"><div id="tabs" role="tablist"></div><button id="add-tab" title="Novo terminal">＋</button></div>
+      <div class="workspace-toolbar"><div id="session-label">Pronto para conectar</div><div class="toolbar-actions"><button id="reconnect" title="Reconectar sessão">↻</button><button id="split" title="Alternar divisão de painéis">◫ Dividir</button><button id="find">Buscar</button><button id="log">Gravar saída</button><button id="broadcast">Multiexecução</button></div></div>
+      <div id="findbar" hidden><input id="find-input" placeholder="Pesquisar no terminal ativo"><button id="find-prev">↑</button><button id="find-next">↓</button><button id="find-close">✕</button></div>
+      <div id="workspace">
+        <section id="welcome"><div class="welcome-mark">&gt;_</div><span class="eyebrow">Conexões sob seu controle</span><h1>Todas as suas sessões<br>em um só lugar</h1><p>Terminais, arquivos e acesso remoto na mesma janela.<br>Dados salvos no seu computador, sem serviços de IA.</p><div class="welcome-actions"><button class="primary" id="welcome-local">Abrir PowerShell <span>↗</span></button><button id="welcome-ssh">Conectar por SSH</button></div><div class="feature-row"><div><b>Organize</b><strong>Pastas e subpastas</strong><span>Arraste sessões entre pastas</span></div><div><b>Conecte</b><strong>RDP com um clique</strong><span>Senha guardada com segurança</span></div><div><b>Instale</b><strong>Pacotes e listas</strong><span>Tudo pelo winget, sem nuvem</span></div></div></section>
+        <div id="panes"></div>
+      </div>
+    </main>
+    <aside id="file-panel" hidden>
+      <div class="section-title">Arquivos <button id="close-files">✕</button></div>
+      <div class="file-modes"><button id="files-local" class="selected">Local</button><button id="files-sftp">SFTP</button><button id="files-ftp">FTP/S</button></div>
+      <div class="file-path"><button id="files-up" title="Pasta superior">↑</button><input id="file-path" aria-label="Caminho dos arquivos"><button id="files-refresh" title="Atualizar">↻</button></div>
+      <div class="file-actions"><button id="files-upload">Enviar</button><button id="files-mkdir">Nova pasta</button></div>
+      <div id="file-list"></div><div id="file-status">Selecione uma pasta.</div>
+    </aside>
+  </div>
+  <footer><span class="status-dot"></span><span id="status">Pronto</span><span id="session-count">0 sessões</span><span class="footer-right">UTF-8 <span>│</span> WINDOWS <span>│</span> <span id="version">0.1.0</span></span></footer>
+  <dialog id="form-dialog"><form id="dialog-form"><div class="dialog-heading"><h2 id="dialog-title"></h2><button type="button" id="dialog-x">✕</button></div><p id="dialog-message"></p><div id="dialog-fields"></div><div class="dialog-actions"><button type="button" id="dialog-cancel">Cancelar</button><button type="submit" class="primary" id="dialog-ok">Salvar</button></div></form></dialog>
+  <dialog id="editor-dialog"><div class="dialog-heading"><h2 id="editor-title">Editor</h2><button id="editor-close">✕</button></div><textarea id="editor-text" spellcheck="false" aria-label="Conteúdo do arquivo"></textarea><div class="dialog-actions"><span>Texto UTF-8 · limite 2 MiB</span><button id="editor-save" class="primary">Salvar arquivo</button></div></dialog>
+  <dialog id="tools-dialog"><div class="dialog-heading"><h2>Ferramentas de infraestrutura</h2><button id="tools-close">✕</button></div><div class="tool-grid" id="tool-grid"></div><pre id="tools-output">Escolha uma ferramenta. Nenhum serviço inicia automaticamente.</pre><div id="active-services"></div></dialog>
+  <div id="toast" role="status" hidden></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

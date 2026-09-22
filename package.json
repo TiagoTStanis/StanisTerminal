@@ -1,0 +1,102 @@
+{
+  "name": "stanis-terminal",
+  "version": "1.1.0",
+  "description": "Terminal local para Windows, sem IA, com sessões e ferramentas de infraestrutura.",
+  "main": "src/main.cjs",
+  "author": "Tiago Torres Stanis",
+  "license": "MIT",
+  "packageManager": "pnpm@10.4.1",
+  "scripts": {
+    "start": "node scripts/prepare.cjs && electron .",
+    "prepare:app": "node scripts/prepare.cjs",
+    "test": "node --openssl-legacy-provider --test tests/*.test.cjs tests/*.test.mjs",
+    "test:ui": "node tests/smoke.cjs",
+    "build": "node scripts/prepare.cjs && electron-builder --win portable --x64",
+    "build:dir": "node scripts/prepare.cjs && electron-builder --win --dir --x64",
+    "test:connections": "node tests/connections.cjs",
+    "test:extras": "node tests/extras.cjs",
+    "test:portable": "node tests/portable.cjs",
+    "test:organize": "node tests/organize.cjs",
+    "test:vault": "electron tests/vault-electron.cjs"
+  },
+  "dependencies": {
+    "@novnc/novnc": "1.7.0",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/addon-search": "0.16.0",
+    "@xterm/xterm": "6.0.0",
+    "basic-ftp": "6.2.1",
+    "fengari": "0.1.5",
+    "node-pty": "1.1.0",
+    "serialport": "13.0.0",
+    "ssh2": "1.17.0"
+  },
+  "devDependencies": {
+    "7zip-bin": "5.2.0",
+    "electron": "44.4.3",
+    "electron-builder": "26.15.3",
+    "esbuild": "0.28.2",
+    "playwright": "1.63.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "node-pty",
+      "cpu-features",
+      "ssh2",
+      "@serialport/bindings-cpp",
+      "esbuild"
+    ]
+  },
+  "build": {
+    "appId": "local.stanis.terminal",
+    "productName": "Stanis Terminal",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "README.md",
+      "LICENSE",
+      "docs/**/*"
+    ],
+    "asarUnpack": [
+      "node_modules/node-pty/**/*",
+      "node_modules/@serialport/bindings-cpp/**/*"
+    ],
+    "npmRebuild": false,
+    "extraResources": [
+      {
+        "from": "src/native/RdpHost.exe",
+        "to": "native/RdpHost.exe"
+      },
+      {
+        "from": "src/native/EmbedHost.exe",
+        "to": "native/EmbedHost.exe"
+      },
+      {
+        "from": "vendor/vcxsrv",
+        "to": "vcxsrv",
+        "filter": [
+          "**/*",
+          "!uninstall.exe",
+          "!$PLUGINSDIR/**/*"
+        ]
+      },
+      {
+        "from": "docs",
+        "to": "docs"
+      }
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "icon": "src/ui/icon.ico",
+      "signExecutable": false
+    },
+    "portable": {
+      "artifactName": "StanisTerminal-${version}-win-x64.exe"
+    }
+  }
+}

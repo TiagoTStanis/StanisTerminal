@@ -1,0 +1,16 @@
+node_modules/
+dist/
+test-results/
+*.log
+data/
+StanisTerminal-data/
+vendor/*-installer.exe
+release/
+vendor/7zip/
+
+# gerados por "pnpm prepare:app"
+src/ui/app.js
+src/ui/vendor/
+src/native/*.exe
+src/ui/icon.ico
+src/ui/icon.png
