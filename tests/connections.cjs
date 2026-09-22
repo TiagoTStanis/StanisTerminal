@@ -195,28 +195,33 @@ function sftpServer(sftp) {
     await new Promise(resolve => setTimeout(resolve, 500));
     assert.ok(vncClipboardReceived.includes('Colado direto na tela VNC'), `Evento paste não chegou ao servidor. Recebido: ${JSON.stringify(vncClipboardReceived)}`);
     console.log('PASS: colar direto na tela VNC (evento paste) também manda o texto para o servidor.');
-    // Teste do controle nativo RDP sem tentar acessar um servidor externo.
-    const closedPortProbe = net.createServer(); const closedPort = await listen(closedPortProbe); await new Promise(resolve => closedPortProbe.close(resolve));
-    const rdpEvents = await app.evaluate(async ({ app, BrowserWindow }, closedPort) => {
-      const { spawn } = process.getBuiltinModule('child_process'); const path = process.getBuiltinModule('path');
-      const file = app.isPackaged ? path.join(process.resourcesPath, 'native/RdpHost.exe') : path.join(app.getAppPath(), 'src/native/RdpHost.exe');
-      const child = spawn(file, [BrowserWindow.getAllWindows()[0].getNativeWindowHandle().readBigUInt64LE().toString()], { windowsHide: true });
-      const events = []; let buffer = '';
-      child.stdout.on('data', bytes => {
-        buffer += bytes;
-        let index; while ((index = buffer.indexOf('\n')) !== -1) { const line = buffer.slice(0, index); buffer = buffer.slice(index + 1); if (line.trim()) events.push(JSON.parse(line)); }
-      });
-      await new Promise((resolve, reject) => { const timer = setTimeout(() => reject(new Error('RDP não respondeu ao carregar')), 15000); const check = setInterval(() => { if (events.some(e => e.type === 'ready')) { clearTimeout(timer); clearInterval(check); resolve(); } }, 100); child.once('error', reject); });
-      // Sem servidor RDP escutando nessa porta: deve falhar rápido (watchdog de conexão), nunca ficar travado sem aviso.
-      child.stdin.write(JSON.stringify({ cmd: 'connect', host: '127.0.0.1', port: closedPort, username: 'tester', password: 'x' }) + '\n');
-      await new Promise((resolve, reject) => { const timer = setTimeout(() => reject(new Error('Nenhum evento de erro/fechamento chegou em 30s: possível travamento silencioso.')), 30000); const check = setInterval(() => { if (events.some(e => e.type === 'error') || child.exitCode !== null) { clearTimeout(timer); clearInterval(check); resolve(); } }, 100); });
-      await new Promise(resolve => setTimeout(resolve, 500));
-      child.stdin.end(); try { child.kill(); } catch { /* já pode ter encerrado sozinho */ }
-      return events;
-    }, closedPort);
-    assert.equal(rdpEvents[0].type, 'ready', rdpEvents[0] && rdpEvents[0].message);
-    assert.ok(rdpEvents.some(e => e.type === 'error' && e.message && e.message.length > 10), `Nenhum erro descritivo foi emitido ao falhar a conexão RDP. Eventos: ${JSON.stringify(rdpEvents)}`);
-    console.log('PASS: componente RDP inicializa, carrega o ActiveX oficial do Windows, e avisa com erro (sem travar) quando a conexão falha. Login remoto bem-sucedido não faz parte deste teste.');
+    // RDP agora roda em WASM (canvas) no renderer, conectado via um proxy WebSocket local (rdpproxy.cjs)
+    // que este processo principal sobe sob demanda — sem controle ActiveX nem janela nativa nenhuma.
+    // O handshake TLS completo já é validado à parte em tests/rdpproxy-handshake.test.cjs (com um
+    // servidor RDP fake); aqui só confirmamos que o app sobe o proxy de verdade e devolve a porta certa.
+    const rdpConnection = page.evaluate(() => window.api.call('graphics:open', { name: 'RDP laboratório', type: 'rdp', host: '127.0.0.1', port: 3389, username: 'tester' }));
+    await page.locator('#form-dialog [name=password]').fill('qualquer-senha'); await page.click('#dialog-ok');
+    const rdpResult = await rdpConnection;
+    assert.ok(Number.isInteger(rdpResult.wsPort) && rdpResult.wsPort > 0, 'graphics:open deve devolver a porta do proxy RDP local');
+    const rdpProxyReachable = await new Promise(resolve => {
+      const probe = net.createConnection({ host: '127.0.0.1', port: rdpResult.wsPort }, () => { probe.destroy(); resolve(true); });
+      probe.once('error', () => resolve(false));
+    });
+    assert.ok(rdpProxyReachable, 'o proxy WebSocket do RDP deveria estar escutando na porta devolvida');
+    await page.evaluate(id => window.api.call('graphics:close', id), rdpResult.id);
+    console.log('PASS: abrir uma sessão RDP sobe o proxy WebSocket local (sem ActiveX/janela nativa) na porta esperada.');
+    // Fluxo real da UI: cria a sessão, o ironrdp-wasm carrega e tenta conectar. Sem servidor RDP de
+    // verdade escutando (porta fechada de propósito), a conexão deve falhar de forma limpa — prova que
+    // o WASM inicializa e a API do SessionBuilder usada bate com a real, sem exceção não tratada
+    // (qualquer erro do tipo apareceria em `errors`, verificado no fim do teste).
+    const closedPortProbe = net.createServer(); const closedRdpPort = await listen(closedPortProbe); await new Promise(resolve => closedPortProbe.close(resolve));
+    await page.click('#new-session'); await page.locator('[name=name]').fill('RDP sem servidor'); await page.locator('[name=type]').selectOption('rdp'); await page.locator('[name=host]').fill('127.0.0.1'); await page.locator('[name=username]').fill('tester');
+    await page.locator('#dialog-advanced summary').click(); await page.locator('[name=port]').fill(String(closedRdpPort)); await page.click('#dialog-ok');
+    await page.locator('.tree-row.session .tree-main').filter({ hasText: 'RDP sem servidor' }).click();
+    await page.locator('#form-dialog [name=password]').fill('qualquer-senha'); await page.click('#dialog-ok');
+    await page.waitForFunction(() => document.querySelector('.graphic-mount canvas.rdp-canvas'), { timeout: 15000 });
+    await page.waitForFunction(() => document.querySelector('#status').textContent.startsWith('RDP:'), { timeout: 15000 });
+    console.log('PASS: sessão RDP real pela UI carrega o ironrdp-wasm, cria o canvas e reporta erro de conexão de forma limpa (sem exceção).');
     await page.click('#new-session'); await page.locator('[name=name]').fill('X11 laboratório'); await page.locator('[name=type]').selectOption('x11'); await page.click('#dialog-ok');
     await page.locator('.tree-row.session .tree-main').filter({ hasText: 'X11 laboratório' }).click();
     await page.waitForSelector('.tab:has-text("X11 laboratório")', { timeout: 30000 });

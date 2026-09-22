@@ -261,7 +261,7 @@ export function setup(ctx) {
     if (!result) return; const started = await call('vnc:start', result);
     return `${started.name}. Para abrir aqui: crie uma sessão VNC para 127.0.0.1 na porta ${started.port}.`;
   });
-  tool('Ferramentas verificadas', 'BusyBox e TightVNC: instalar ou remover (hash e assinatura conferidos)', async () => {
+  tool('Ferramentas verificadas', 'BusyBox, TightVNC e Oh My Posh: instalar ou remover (hash conferido)', async () => {
     const list = await call('tools:list');
     const answer = await form({ title: 'Ferramentas de terceiros', message: 'Baixadas só da origem oficial, com SHA-256 conferido e somente depois da sua confirmação. Nenhum dado seu é enviado.', fields: [{ name: 'action', label: 'Ação', wide: true, options: list.map(t => ({ value: (t.installed ? 'remove:' : 'install:') + t.id, label: `${t.installed ? 'Remover' : 'Instalar'}: ${t.name} — ${t.version} (${t.license})` })) }], accept: 'Continuar' });
     if (!answer) return; const [op, id] = answer.action.split(':');

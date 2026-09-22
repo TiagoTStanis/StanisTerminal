@@ -292,6 +292,7 @@ function register() {
     config.value.packageLists = cleanLists([...(config.value.packageLists || []), list]); config.save(); return config.value.packageLists;
   });
   handle('tools:list', () => tools.list());
+  handle('tools:path', id => { const key = text(id, 40); return tools.installed(key) ? tools.file(key) : null; });
   handle('tools:install', async id => { await tools.install(text(id, 40)); return tools.list(); });
   handle('tools:remove', async id => { await tools.remove(text(id, 40)); return tools.list(); });
   handle('transfer:cancel', id => transfers.cancel(id));
@@ -360,7 +361,12 @@ app.whenReady().then(async () => {
     });
     session.defaultSession.setPermissionRequestHandler((_, __, callback) => callback(false));
     session.defaultSession.setPermissionCheckHandler(() => false);
-    session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (_, callback) => callback({ cancel: true }));
+    session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (details, callback) => {
+      // Única exceção: o proxy RDCleanPath local (WebSocket -> TLS -> TCP) que o cliente RDP em
+      // WASM usa para alcançar o servidor de verdade — nunca sai da máquina, porta é dinâmica.
+      const allowed = graphics?.rdpProxyPort && details.url === `ws://127.0.0.1:${graphics.rdpProxyPort}/`;
+      callback({ cancel: !allowed });
+    });
     window = new BrowserWindow({ width: 1440, height: 900, minWidth: 900, minHeight: 600, show: false, backgroundColor: '#0c111b', title: 'Stanis Terminal', icon: path.join(__dirname, 'ui/icon.ico'), webPreferences: { preload: path.join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, spellcheck: false } });
     Menu.setApplicationMenu(null);
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));

@@ -3,6 +3,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import RFB from '@novnc/novnc';
+import scancode from './rdpkeys.js';
 import { setup } from './extras.js';
 import { setupPackages } from './packages.js';
 import { setupTree } from './tree.js';
@@ -151,7 +152,7 @@ async function openSession(profile) {
     // Intercepta colagem nativa para evitar executar várias linhas sem revisão.
     mount.addEventListener('paste', event => { event.preventDefault(); event.stopPropagation(); safe(() => paste(item, event.clipboardData.getData('text/plain')))(); }, true);
     await call('terminal:activate', item.id);
-    if (profile.type === 'local' && state.config.settings.coloredPrompt !== false) { const promptCommand = coloredPromptCommand(profile.shell); if (promptCommand) safe(() => call('terminal:write', item.id, promptCommand))(); }
+    if (profile.type === 'local' && state.config.settings.coloredPrompt !== false) safe(async () => { const promptCommand = await coloredPromptCommand(profile.shell); if (promptCommand) await call('terminal:write', item.id, promptCommand); })();
   } else {
     item.mount = elem('div', '', 'graphic-mount'); item.pane.append(item.mount);
     if (profile.type === 'vnc') {
@@ -189,9 +190,90 @@ async function openSession(profile) {
       );
       item.pane.append(bar);
       await call('graphics:activate', item.id);
-    } else item.mount.append(elem('div', profile.type === 'rdp' ? 'Conectando à área de trabalho…' : 'Servidor X11 ativo. Abra uma sessão SSH com aplicativos X11 para exibir as janelas aqui.', 'graphic-message'));
+    } else if (profile.type === 'rdp') {
+      await openRdp(item, result);
+    } else item.mount.append(elem('div', 'Servidor X11 ativo. Abra uma sessão SSH com aplicativos X11 para exibir as janelas aqui.', 'graphic-message'));
   }
-  activeId = item.id; layout(); toast(`${profile.name} aberta.`); item.terminal?.focus(); scheduleSaveOpen();
+  activeId = item.id; layout(); if (!item.ended) toast(`${profile.name} aberta.`); item.terminal?.focus(); scheduleSaveOpen();
+}
+let ironRdp = null;
+async function loadIronRdp() {
+  if (ironRdp) return ironRdp;
+  const mod = await import('ironrdp-wasm');
+  await mod.default('stanis://app/rdp_client_bg.wasm');
+  mod.setup('warn');
+  ironRdp = mod; return mod;
+}
+const RDP_ERROR_KINDS = { 0: 'Erro geral', 1: 'Senha incorreta', 2: 'Falha no login', 3: 'Acesso negado', 4: 'Falha no proxy RDCleanPath', 5: 'Falha ao conectar no proxy', 6: 'Falha na negociação do protocolo' };
+function rdpErrorText(error) {
+  if (error && typeof error === 'object' && typeof error.kind === 'function') {
+    try { return `${RDP_ERROR_KINDS[error.kind()] || 'Erro desconhecido'}${error.backtrace ? ': ' + error.backtrace() : ''}`; } catch { /* objeto já liberado pelo wasm */ }
+  }
+  return error?.message || String(error);
+}
+async function openRdp(item, result) {
+  const canvas = document.createElement('canvas'); canvas.className = 'rdp-canvas'; canvas.tabIndex = 0;
+  item.mount.append(canvas);
+  let rdp;
+  try { rdp = await loadIronRdp(); }
+  catch (error) { toast('Não foi possível carregar o componente RDP: ' + (error?.message || error)); item.ended = true; renderTabs(); return; }
+  const width = Math.max(320, Math.round(item.mount.clientWidth || 1280)), height = Math.max(240, Math.round(item.mount.clientHeight || 800));
+  const builder = new rdp.SessionBuilder();
+  builder.username(result.profile.username || ''); builder.password(result.password || '');
+  builder.destination(`${result.profile.host}:${result.profile.port}`);
+  builder.proxyAddress(`ws://127.0.0.1:${result.wsPort}/`);
+  builder.authToken('none');
+  builder.desktopSize(new rdp.DesktopSize(width, height));
+  builder.renderCanvas(canvas);
+  builder.extension(new rdp.Extension('enable_credssp', true));
+  builder.remoteClipboardChangedCallback(clipboardData => safe(() => {
+    if (clipboardData.isEmpty()) return;
+    for (const entry of clipboardData.items()) if (entry.mimeType() === 'text/plain') call('clipboard:write', entry.value());
+  })());
+  const sendClipboard = () => safe(async () => {
+    if (!item.rdpSession) return;
+    const text = await call('clipboard:read'); if (!text) return;
+    const data = new rdp.ClipboardData(); data.addText('text/plain', text);
+    await item.rdpSession.onClipboardPaste(data);
+  })();
+  builder.forceClipboardUpdateCallback(sendClipboard);
+  builder.setCursorStyleCallbackContext(canvas);
+  builder.setCursorStyleCallback(style => { canvas.style.cursor = style || 'default'; });
+  try { item.rdpSession = await builder.connect(); }
+  catch (error) { toast('RDP: ' + rdpErrorText(error)); item.ended = true; renderTabs(); return; }
+  const size = item.rdpSession.desktopSize(); canvas.width = size.width; canvas.height = size.height;
+  canvas.focus(); toast('RDP conectado.');
+  const runInput = (build) => { if (!item.rdpSession) return; const tx = new rdp.InputTransaction(); build(tx); safe(() => item.rdpSession.applyInputs(tx))(); };
+  canvas.addEventListener('keydown', event => { event.preventDefault(); const code = scancode(event); if (code === undefined) return; runInput(tx => tx.addEvent(rdp.DeviceEvent.keyPressed(code))); });
+  canvas.addEventListener('keyup', event => { event.preventDefault(); const code = scancode(event); if (code === undefined) return; runInput(tx => tx.addEvent(rdp.DeviceEvent.keyReleased(code))); });
+  canvas.addEventListener('mousemove', event => {
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.round((event.clientX - rect.left) * (canvas.width / rect.width)), y = Math.round((event.clientY - rect.top) * (canvas.height / rect.height));
+    runInput(tx => tx.addEvent(rdp.DeviceEvent.mouseMove(x, y)));
+  });
+  canvas.addEventListener('mousedown', event => { event.preventDefault(); canvas.focus(); runInput(tx => tx.addEvent(rdp.DeviceEvent.mouseButtonPressed(event.button))); });
+  canvas.addEventListener('mouseup', event => { event.preventDefault(); runInput(tx => tx.addEvent(rdp.DeviceEvent.mouseButtonReleased(event.button))); });
+  canvas.addEventListener('wheel', event => {
+    event.preventDefault();
+    if (event.deltaY) runInput(tx => tx.addEvent(rdp.DeviceEvent.wheelRotations(true, event.deltaY > 0 ? -1 : 1, 1)));
+    if (event.deltaX) runInput(tx => tx.addEvent(rdp.DeviceEvent.wheelRotations(false, event.deltaX > 0 ? -1 : 1, 1)));
+  }, { passive: false });
+  canvas.addEventListener('contextmenu', event => event.preventDefault());
+  canvas.addEventListener('paste', event => { event.preventDefault(); sendClipboard(); });
+  canvas.addEventListener('focus', sendClipboard);
+  const bar = elem('div', '', 'graphic-toolbar');
+  bar.append(
+    button('⌨ Ctrl+Alt+Del', () => runInput(tx => {
+      tx.addEvent(rdp.DeviceEvent.keyPressed(0x1D)); tx.addEvent(rdp.DeviceEvent.keyPressed(0x38)); tx.addEvent(rdp.DeviceEvent.keyPressed(0x53));
+      tx.addEvent(rdp.DeviceEvent.keyReleased(0x53)); tx.addEvent(rdp.DeviceEvent.keyReleased(0x38)); tx.addEvent(rdp.DeviceEvent.keyReleased(0x1D));
+    })),
+    button('📋 Colar texto', sendClipboard),
+    button('⛶ Tela cheia', () => item.pane.requestFullscreen())
+  );
+  item.pane.append(bar);
+  item.rdpSession.run().then(info => {
+    item.ended = true; toast('RDP desconectado' + (info?.reason ? ': ' + info.reason() : '.')); renderTabs();
+  }).catch(error => { item.ended = true; toast('RDP: ' + rdpErrorText(error)); renderTabs(); });
 }
 async function paste(item, text) {
   if (!text) return;
@@ -202,7 +284,7 @@ async function closeSession(id, force = false) {
   const item = sessions.get(id); if (!item) return;
   if (!force && !item.ended && !await form({ title: 'Encerrar sessão?', message: item.name, fields: [], accept: 'Encerrar' })) return;
   await call(item.graphical ? 'graphics:close' : 'terminal:close', id);
-  item.rfb?.disconnect(); item.terminal?.dispose(); item.pane.remove(); sessions.delete(id);
+  item.rfb?.disconnect(); try { item.rdpSession?.shutdown(); } catch { /* já encerrada */ } item.terminal?.dispose(); item.pane.remove(); sessions.delete(id);
   if (activeId === id) activeId = [...sessions.keys()].at(-1);
   layout(); scheduleSaveOpen();
 }
@@ -227,12 +309,19 @@ function layout() {
 }
 function updateNativeBounds() {
   const modal = !!document.querySelector('dialog[open]');
-  for (const item of sessions.values()) if (['rdp', 'x11', 'xdmcp'].includes(item.profile.type)) {
+  for (const item of sessions.values()) if (['x11', 'xdmcp'].includes(item.profile.type)) {
     const bounds = item.pane.getBoundingClientRect();
     safe(() => call('graphics:bounds', item.id, { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, visible: !item.pane.hidden && !modal }))();
   }
 }
-function coloredPromptCommand(shell) {
+async function coloredPromptCommand(shell) {
+  // Se o Oh My Posh (instalável em Ferramentas → Ferramentas verificadas) já estiver presente, usa
+  // o tema dele (git, ícones, cores) — o mesmo estilo do oh-my-zsh, mas para PowerShell/bash no Windows.
+  const poshPath = await call('tools:path', 'ohmyposh').catch(() => null);
+  if (poshPath) {
+    if (shell === 'powershell') return `(& ${JSON.stringify(poshPath)} init pwsh) | Invoke-Expression\r`;
+    if (['bash', 'wsl', 'msys2', 'busybox'].includes(shell)) return `eval "$("${poshPath}" init bash)"\r`;
+  }
   if (shell === 'powershell') return 'function prompt { $e=[char]27; "$e[36m$env:USERNAME$e[0m@$e[33m$env:COMPUTERNAME$e[0m $e[32m$($PWD.Path)$e[0m> " }\r';
   if (shell === 'cmd') return 'prompt $E[36m%USERNAME%$E[0m@$E[33m%COMPUTERNAME%$E[0m $E[32m$P$E[0m$G\r';
   if (['bash', 'wsl', 'msys2', 'busybox'].includes(shell)) return String.raw`export PS1='\[\e[36m\]\u\[\e[0m\]@\[\e[33m\]\h\[\e[0m\] \[\e[32m\]\w\[\e[0m\]\$ '` + '\r';
@@ -367,7 +456,7 @@ $('settings').onclick = safe(async () => {
   const lock = await call('lock:status');
   const values = await form({ title: 'Preferências', message: 'Dados locais: ' + state.dataPath, fields: [{ name: 'fontSize', label: 'Fonte do terminal', type: 'number', value: state.config.settings.fontSize, min: 10, max: 28 }, { name: 'theme', label: 'Tema', value: state.config.settings.theme, options: [{ value: 'dark', label: 'Escuro' }, { value: 'light', label: 'Claro' }, { value: 'dracula', label: 'Dracula' }, { value: 'nord', label: 'Nord' }, { value: 'solarized', label: 'Solarized escuro' }, { value: 'monokai', label: 'Monokai' }] }, { name: 'scrollback', label: 'Linhas no histórico', type: 'number', value: state.config.settings.scrollback }, { name: 'syncFolder', label: 'Pasta de sincronização (OneDrive, Dropbox, repositório Git…)', value: state.config.settings.syncFolder || '', wide: true }, { name: 'autocomplete', label: 'Sugerir comandos do histórico enquanto digito', type: 'checkbox', value: state.config.settings.autocomplete !== false, wide: true }, { name: 'restoreSessions', label: 'Reabrir as sessões ao iniciar o aplicativo', type: 'checkbox', value: !!state.config.settings.restoreSessions, wide: true },
     { name: 'highlightErrors', label: 'Destacar "error"/"erro", "failed"/"falhou" e "warning"/"aviso" automaticamente na saída do terminal', type: 'checkbox', value: state.config.settings.highlightErrors !== false, wide: true },
-    { name: 'coloredPrompt', label: 'Usar um prompt colorido (usuário@host:pasta) nos terminais locais novos', type: 'checkbox', value: state.config.settings.coloredPrompt !== false, wide: true },
+    { name: 'coloredPrompt', label: 'Usar um prompt colorido nos terminais locais novos (Oh My Posh se instalado em Ferramentas, senão usuário@host:pasta simples)', type: 'checkbox', value: state.config.settings.coloredPrompt !== false, wide: true },
     { name: 'lockPassword', label: lock.enabled ? 'Trocar a senha mestra (deixe vazio para manter; “remover” abaixo tira a proteção)' : 'Definir senha mestra (bloqueia a lista de sessões ao abrir o app)', type: 'password', wide: true },
     { name: 'autoLockMinutes', label: 'Bloquear automaticamente após (minutos, 0 = nunca)', type: 'number', value: lock.autoLockMinutes || 15, min: 0, max: 180 },
     ...(lock.enabled ? [{ name: 'removeLock', label: 'Remover a senha mestra (pede a senha atual)', type: 'checkbox', wide: true }] : []),

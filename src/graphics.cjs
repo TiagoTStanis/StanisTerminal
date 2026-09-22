@@ -4,8 +4,26 @@ const fs = require('node:fs');
 const { spawn } = require('node:child_process');
 const { randomUUID, randomBytes } = require('node:crypto');
 const readline = require('node:readline');
+const { WebSocketServer } = require('ws');
+const { handleConnection } = require('./rdpproxy.cjs');
 class Graphics {
   constructor(window, emit, ask, packaged, vault, isSaved = () => false) { this.window = window; this.emit = emit; this.ask = ask; this.packaged = packaged; this.vault = vault; this.isSaved = isSaved; this.items = new Map(); }
+  // Servidor local único (proxy RDCleanPath) que o cliente RDP em WASM do renderer usa para
+  // alcançar o servidor RDP real — o navegador não fala TCP puro nem TLS com certificado
+  // autoassinado, então fazemos essa ponte no processo principal, igual já fazemos pro VNC.
+  async ensureRdpProxy() {
+    if (this.rdpProxyPort) return this.rdpProxyPort;
+    if (!this.rdpProxyStarting) {
+      this.rdpProxyStarting = new Promise((resolve, reject) => {
+        const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+        wss.once('error', reject);
+        wss.once('listening', () => { this.rdpProxyPort = wss.address().port; resolve(this.rdpProxyPort); });
+        wss.on('connection', ws => handleConnection(ws, { readyTimeout: 15000 }));
+        this.rdpProxyServer = wss;
+      });
+    }
+    return this.rdpProxyStarting;
+  }
   async open(profile) {
     const id = randomUUID();
     if (['x11', 'xdmcp'].includes(profile.type)) return this.openX11(id, profile);
@@ -28,38 +46,14 @@ class Graphics {
       password = credentials.password || '';
       if (canRemember && credentials.remember) this.vault.set(profile, password);
     }
-    const executable = this.packaged ? path.join(process.resourcesPath, 'native', 'RdpHost.exe') : path.join(__dirname, 'native', 'RdpHost.exe');
-    if (!fs.existsSync(executable)) throw new Error('Compile o componente nativo: pnpm prepare:app.');
-    const hwnd = this.window.getNativeWindowHandle().readBigUInt64LE().toString();
-    const child = spawn(executable, [hwnd], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
-    const item = { child, profile }; this.items.set(id, item);
-    const ready = new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('Controle RDP não respondeu.')), 15000);
-      child.on('error', error => { clearTimeout(timer); reject(error); });
-      child.once('exit', () => { clearTimeout(timer); reject(new Error('Controle RDP foi encerrado.')); });
-      readline.createInterface({ input: child.stdout }).on('line', line => {
-        try {
-          const event = JSON.parse(line);
-          if (event.type === 'ready') { clearTimeout(timer); resolve(); }
-          if (event.type === 'error') { clearTimeout(timer); reject(new Error(event.message)); }
-          this.emit('graphics:state', { id, ...event });
-        } catch { /* Saída não estruturada do componente nativo. */ }
-      });
-    });
-    child.stdin.on('error', () => {});
-    child.on('exit', () => this.emit('graphics:state', { id, type: 'close' }));
-    try {
-      await ready;
-      // Mostra e dimensiona a janela nativa ANTES de conectar: alguns controles ActiveX (como o
-      // MsRdpClient) só vinculam a superfície de vídeo corretamente se já estiverem visíveis e com
-      // tamanho real no momento do Connect(). Sem isso, a conexão completa mas a tela nunca aparece —
-      // o painel real do lado do renderer corrige a posição/tamanho exatos logo em seguida.
-      const content = this.window.getContentBounds();
-      this.bounds(id, { x: 0, y: 0, width: Math.max(200, content.width), height: Math.max(200, content.height), visible: true });
-      child.stdin.write(JSON.stringify({ cmd: 'connect', host: profile.host, port: profile.port, username: profile.username, password }) + '\n');
-    }
-    catch (error) { this.close(id); throw error; }
-    return { id, name: profile.name, profile };
+    // O controle ActiveX do Windows (MsRdpClient) precisava ser embutido via processo separado
+    // (SetParent), o que no Windows 11 sofre de um problema conhecido de sincronização com o DWM —
+    // a janela nunca aparece visualmente. Em vez disso, o próprio renderer roda o cliente RDP em
+    // WASM (ironrdp-wasm) e desenha num <canvas>, como o VNC já faz com o noVNC; aqui só garantimos
+    // que o proxy local (WebSocket ↔ TLS ↔ TCP) esteja no ar.
+    const wsPort = await this.ensureRdpProxy();
+    const item = { profile }; this.items.set(id, item);
+    return { id, name: profile.name, profile, password, wsPort };
   }
   async openX11(id, profile) {
     if ([...this.items.values()].some(x => x.xserver)) throw new Error('Já existe um servidor X11 ativo. Feche a aba X11 antes de iniciar outro.');

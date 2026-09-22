@@ -11,6 +11,7 @@ vendor/7zip/
 # gerados por "pnpm prepare:app"
 src/ui/app.js
 src/ui/vendor/
+src/ui/rdp_client_bg.wasm
 src/native/*.exe
 src/ui/icon.ico
 src/ui/icon.png
