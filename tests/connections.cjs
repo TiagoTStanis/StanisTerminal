@@ -47,7 +47,8 @@ function sftpServer(sftp) {
   sftp.on('REMOVE', (id, file) => { contents.delete(file); sftp.status(id, STATUS_CODE.OK); });
 }
 (async () => {
-  let app, ssh, telnet, echo, vnc, ftp;
+  let app, ssh, telnet, echo, vnc, ftp, vncSocket;
+  const vncClipboardReceived = [];
   try {
     echo = net.createServer(socket => { track(socket); socket.pipe(socket); }); const echoPort = await listen(echo);
     const key = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs1', format: 'pem' });
@@ -71,7 +72,7 @@ function sftpServer(sftp) {
     telnet = net.createServer(socket => { track(socket); socket.write('TELNET_LAB_READY\r\n'); socket.on('data', bytes => socket.write(bytes)); }); const telnetPort = await listen(telnet);
     // RFB 3.8 mínimo, sem autenticação, para validar transporte e framebuffer no noVNC.
     vnc = net.createServer(socket => {
-      track(socket); let stage = 0, buffer = Buffer.alloc(0); socket.write('RFB 003.008\n');
+      track(socket); vncSocket = socket; let stage = 0, buffer = Buffer.alloc(0); socket.write('RFB 003.008\n');
       socket.on('data', chunk => {
         buffer = Buffer.concat([buffer, chunk]);
         if (stage === 0 && buffer.length >= 12) { buffer = buffer.subarray(12); stage = 1; socket.write(Buffer.from([1, 1])); }
@@ -84,18 +85,22 @@ function sftpServer(sftp) {
         }
         if (stage === 3) {
           while (buffer.length) {
-            const type = buffer[0]; const length = type === 0 ? 20 : type === 2 && buffer.length >= 4 ? 4 + buffer.readUInt16BE(2) * 4 : type === 3 ? 10 : type === 4 ? 8 : type === 5 ? 6 : 0;
+            const type = buffer[0];
+            const length = type === 0 ? 20 : type === 2 && buffer.length >= 4 ? 4 + buffer.readUInt16BE(2) * 4
+              : type === 3 ? 10 : type === 4 ? 8 : type === 5 ? 6 : type === 6 && buffer.length >= 8 ? 8 + buffer.readUInt32BE(4) : 0;
             if (!length || buffer.length < length) break;
-            buffer = buffer.subarray(length);
+            const message = buffer.subarray(0, length); buffer = buffer.subarray(length);
             if (type === 3) {
               const header = Buffer.alloc(16); header.writeUInt16BE(1, 2); header.writeUInt16BE(64, 8); header.writeUInt16BE(64, 10);
               const pixels = Buffer.alloc(64 * 64 * 4); for (let i = 0; i < pixels.length; i += 4) { pixels[i] = 80; pixels[i + 1] = 160; pixels[i + 2] = 40; }
               socket.write(Buffer.concat([header, pixels]));
             }
+            if (type === 6) vncClipboardReceived.push(message.subarray(8).toString('latin1'));
           }
         }
       });
     }); const vncPort = await listen(vnc);
+    function sendServerCutText(text) { const body = Buffer.from(text, 'latin1'); const header = Buffer.alloc(8); header[0] = 3; header.writeUInt32BE(body.length, 4); vncSocket.write(Buffer.concat([header, body])); }
     const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
     app = await electron.launch({ executablePath: process.env.STANIS_TEST_EXE || require('electron'), args: process.env.STANIS_TEST_EXE ? ['--test-mode'] : [root, '--test-mode'], env, timeout: 45000 });
     const page = await app.firstWindow(); await page.waitForSelector('#sessions-list .tree-section');
@@ -163,21 +168,55 @@ function sftpServer(sftp) {
     await page.evaluate(id => window.api.call('terminal:activate', id), tel.id); await page.waitForFunction(() => window.labOutput.includes('TELNET_LAB_READY'));
     await page.evaluate(id => window.api.call('terminal:write', id, 'TELNET_ECHO_OK\r'), tel.id); await page.waitForFunction(() => window.labOutput.includes('TELNET_ECHO_OK'));
     console.log('PASS: conexão Telnet e troca de dados reais em localhost.');
-    await page.click('#new-session'); await page.locator('[name=name]').fill('VNC laboratório'); await page.locator('[name=type]').selectOption('vnc'); await page.locator('[name=host]').fill('127.0.0.1'); await page.locator('[name=port]').fill(String(vncPort)); await page.click('#dialog-ok');
+    await page.click('#new-session'); await page.locator('[name=name]').fill('VNC laboratório'); await page.locator('[name=type]').selectOption('vnc'); await page.locator('[name=host]').fill('127.0.0.1');
+    await page.locator('#dialog-advanced summary').click(); await page.locator('[name=port]').fill(String(vncPort)); await page.click('#dialog-ok');
     await page.locator('.tree-row.session .tree-main').filter({ hasText: 'VNC laboratório' }).click(); await page.waitForFunction(() => document.querySelector('#status').textContent === 'VNC conectado.');
     await page.waitForFunction(() => [...document.querySelectorAll('.graphic-mount canvas')].some(canvas => canvas.width === 64 && canvas.height === 64 && canvas.getContext('2d').getImageData(0, 0, 1, 1).data[1] === 160));
     console.log('PASS: VNC negocia RFB, conecta no noVNC e renderiza o framebuffer recebido.');
+    // Clipboard do servidor VNC chega no clipboard do Windows.
+    await app.evaluate(({ clipboard }) => clipboard.writeText('')); sendServerCutText('Veio do servidor VNC de laboratório');
+    await page.waitForFunction(async () => { const text = await window.api.call('clipboard:read'); return text === 'Veio do servidor VNC de laboratório'; });
+    console.log('PASS: clipboard do servidor VNC (ServerCutText) chega no clipboard do Windows.');
+    // Ctrl+Shift+V manda o clipboard do Windows para o servidor VNC.
+    await app.evaluate(({ clipboard }) => clipboard.writeText('Indo para o servidor VNC de laboratório'));
+    await page.locator('.graphic-mount canvas').click();
+    await page.keyboard.press('Control+Shift+V');
+    await new Promise(resolve => setTimeout(resolve, 300));
+    assert.ok(vncClipboardReceived.includes('Indo para o servidor VNC de laboratório'), `ClientCutText não chegou ao servidor. Recebido: ${JSON.stringify(vncClipboardReceived)}`);
+    console.log('PASS: Ctrl+Shift+V manda o clipboard do Windows para o servidor VNC (ClientCutText).');
+    // Colar direto na tela (evento nativo "paste") também deve funcionar.
+    vncClipboardReceived.length = 0;
+    await app.evaluate(({ clipboard }) => clipboard.writeText('Colado direto na tela VNC'));
+    await page.evaluate(async () => {
+      const canvas = document.querySelector('.graphic-mount canvas'); canvas.focus();
+      const data = new DataTransfer(); data.setData('text/plain', 'Colado direto na tela VNC');
+      canvas.closest('.graphic-mount').dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    });
+    await new Promise(resolve => setTimeout(resolve, 500));
+    assert.ok(vncClipboardReceived.includes('Colado direto na tela VNC'), `Evento paste não chegou ao servidor. Recebido: ${JSON.stringify(vncClipboardReceived)}`);
+    console.log('PASS: colar direto na tela VNC (evento paste) também manda o texto para o servidor.');
     // Teste do controle nativo RDP sem tentar acessar um servidor externo.
-    const rdp = await app.evaluate(async ({ app, BrowserWindow }) => {
+    const closedPortProbe = net.createServer(); const closedPort = await listen(closedPortProbe); await new Promise(resolve => closedPortProbe.close(resolve));
+    const rdpEvents = await app.evaluate(async ({ app, BrowserWindow }, closedPort) => {
       const { spawn } = process.getBuiltinModule('child_process'); const path = process.getBuiltinModule('path');
       const file = app.isPackaged ? path.join(process.resourcesPath, 'native/RdpHost.exe') : path.join(app.getAppPath(), 'src/native/RdpHost.exe');
-      return new Promise((resolve, reject) => {
-        const child = spawn(file, [BrowserWindow.getAllWindows()[0].getNativeWindowHandle().readBigUInt64LE().toString()], { windowsHide: true });
-        let data = ''; const timer = setTimeout(() => { child.kill(); reject(new Error('RDP não respondeu')); }, 15000);
-        child.once('error', reject); child.stdout.on('data', bytes => { data += bytes; if (data.includes('\n')) { clearTimeout(timer); child.stdin.end(); resolve(JSON.parse(data.trim().split('\n')[0])); } });
+      const child = spawn(file, [BrowserWindow.getAllWindows()[0].getNativeWindowHandle().readBigUInt64LE().toString()], { windowsHide: true });
+      const events = []; let buffer = '';
+      child.stdout.on('data', bytes => {
+        buffer += bytes;
+        let index; while ((index = buffer.indexOf('\n')) !== -1) { const line = buffer.slice(0, index); buffer = buffer.slice(index + 1); if (line.trim()) events.push(JSON.parse(line)); }
       });
-    }); assert.equal(rdp.type, 'ready', rdp.message);
-    console.log('PASS: componente RDP inicializa e carrega o ActiveX oficial do Windows. Login remoto não faz parte deste teste.');
+      await new Promise((resolve, reject) => { const timer = setTimeout(() => reject(new Error('RDP não respondeu ao carregar')), 15000); const check = setInterval(() => { if (events.some(e => e.type === 'ready')) { clearTimeout(timer); clearInterval(check); resolve(); } }, 100); child.once('error', reject); });
+      // Sem servidor RDP escutando nessa porta: deve falhar rápido (watchdog de conexão), nunca ficar travado sem aviso.
+      child.stdin.write(JSON.stringify({ cmd: 'connect', host: '127.0.0.1', port: closedPort, username: 'tester', password: 'x' }) + '\n');
+      await new Promise((resolve, reject) => { const timer = setTimeout(() => reject(new Error('Nenhum evento de erro/fechamento chegou em 30s: possível travamento silencioso.')), 30000); const check = setInterval(() => { if (events.some(e => e.type === 'error') || child.exitCode !== null) { clearTimeout(timer); clearInterval(check); resolve(); } }, 100); });
+      await new Promise(resolve => setTimeout(resolve, 500));
+      child.stdin.end(); try { child.kill(); } catch { /* já pode ter encerrado sozinho */ }
+      return events;
+    }, closedPort);
+    assert.equal(rdpEvents[0].type, 'ready', rdpEvents[0] && rdpEvents[0].message);
+    assert.ok(rdpEvents.some(e => e.type === 'error' && e.message && e.message.length > 10), `Nenhum erro descritivo foi emitido ao falhar a conexão RDP. Eventos: ${JSON.stringify(rdpEvents)}`);
+    console.log('PASS: componente RDP inicializa, carrega o ActiveX oficial do Windows, e avisa com erro (sem travar) quando a conexão falha. Login remoto bem-sucedido não faz parte deste teste.');
     await page.click('#new-session'); await page.locator('[name=name]').fill('X11 laboratório'); await page.locator('[name=type]').selectOption('x11'); await page.click('#dialog-ok');
     await page.locator('.tree-row.session .tree-main').filter({ hasText: 'X11 laboratório' }).click();
     await page.waitForSelector('.tab:has-text("X11 laboratório")', { timeout: 30000 });

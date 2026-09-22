@@ -7,6 +7,17 @@ import { setup } from './extras.js';
 import { setupPackages } from './packages.js';
 import { setupTree } from './tree.js';
 
+// noVNC intencionalmente não expõe o motivo técnico da falha no evento 'disconnect' (só loga no console).
+// Capturamos aqui para poder mostrar algo além de "Conexão VNC interrompida." quando a negociação falha
+// antes mesmo de pedir a senha (ex.: tipo de segurança do servidor não suportado).
+let lastRfbFailureDetail = '';
+const nativeConsoleError = console.error.bind(console);
+console.error = (...args) => {
+  const text = typeof args[0] === 'string' ? args[0] : '';
+  const match = text.match(/^(?:Failed when connecting|Failed while connected|Failed when disconnecting|RFB failure): (.+)$/);
+  if (match) lastRfbFailureDetail = match[1];
+  nativeConsoleError(...args);
+};
 const $ = id => document.getElementById(id);
 const api = window.api;
 const call = (name, ...args) => api.call(name, ...args);
@@ -153,7 +164,15 @@ async function openSession(profile) {
         if (credentials) item.rfb.sendCredentials(credentials); else await closeSession(item.id, true);
       }));
       item.rfb.addEventListener('connect', () => toast('VNC conectado.'));
-      item.rfb.addEventListener('disconnect', event => { item.ended = true; toast(event.detail.clean ? 'VNC desconectado.' : 'Conexão VNC interrompida.'); renderTabs(); });
+      item.rfb.addEventListener('disconnect', event => {
+        item.ended = true;
+        let message = event.detail.clean ? 'VNC desconectado.' : 'Conexão VNC interrompida.';
+        if (!event.detail.clean && lastRfbFailureDetail) {
+          if (/Unsupported security types/i.test(lastRfbFailureDetail)) message = 'Este servidor VNC exige um tipo de autenticação que o app não suporta ainda. Detalhe técnico: ' + lastRfbFailureDetail;
+          else message += ' Detalhe técnico: ' + lastRfbFailureDetail;
+        }
+        toast(message); lastRfbFailureDetail = ''; renderTabs();
+      });
       item.rfb.addEventListener('securityfailure', event => toast(event.detail.reason || 'Autenticação VNC falhou.'));
       item.rfb.addEventListener('clipboard', event => safe(() => call('clipboard:write', event.detail.text))());
       const sendClipboard = () => safe(async () => { const text = await call('clipboard:read'); if (text) item.rfb.clipboardPasteFrom(text); })();

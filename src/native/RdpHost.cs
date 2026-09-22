@@ -21,6 +21,8 @@ class RdpHost : Form {
     readonly JavaScriptSerializer json = new JavaScriptSerializer();
     readonly RdpControl rdp = new RdpControl();
     IntPtr parent;
+    System.Windows.Forms.Timer connectWatch;
+    int connectElapsedMs; bool wasConnecting;
     public RdpHost(long parentHandle) {
         parent = new IntPtr(parentHandle);
         FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false;
@@ -36,7 +38,7 @@ class RdpHost : Form {
             catch (Exception ex) { Emit("error", ex.Message); Close(); return; }
             var input = new Thread(ReadCommands); input.IsBackground = true; input.Start();
         };
-        FormClosing += delegate { try { dynamic c = rdp.Com; if (c.Connected != 0) c.Disconnect(); } catch {} };
+        FormClosing += delegate { if (connectWatch != null) connectWatch.Stop(); try { dynamic c = rdp.Com; if (c.Connected != 0) c.Disconnect(); } catch {} };
     }
     void Emit(string type, string message) { Console.WriteLine(json.Serialize(new { type = type, message = message })); Console.Out.Flush(); }
     void ReadCommands() {
@@ -65,12 +67,38 @@ class RdpHost : Form {
                 dynamic advanced = c.AdvancedSettings8;
                 advanced.RDPPort = Convert.ToInt32(p["port"]);
                 advanced.EnableCredSspSupport = true;
-                advanced.AuthenticationLevel = 1; // Recusar servidor cuja identidade não possa ser autenticada.
+                // Nível 2: tenta autenticar o servidor, mas permite prosseguir (com aviso) se o certificado
+                // não for confiável — a maioria dos servidores domésticos/administrativos usa certificado
+                // autoassinado. Nível 1 (exigir sucesso) travava a conexão sem aviso nesses casos.
+                advanced.AuthenticationLevel = 2;
                 advanced.SmartSizing = true;
                 advanced.RedirectClipboard = false;
                 advanced.RedirectDrives = false;
                 advanced.ClearTextPassword = Convert.ToString(p["password"]);
                 c.Connect(); Emit("connecting", "Conectando ao servidor RDP");
+                // O controle não expõe eventos aqui (sem wrapper de interop gerado), então observamos
+                // Connected por polling: sem isso, uma falha silenciosa (ex.: autenticação recusada)
+                // deixava a aba travada sem nenhum aviso para o usuário.
+                if (connectWatch != null) connectWatch.Stop();
+                connectElapsedMs = 0; wasConnecting = false;
+                connectWatch = new System.Windows.Forms.Timer(); connectWatch.Interval = 400;
+                connectWatch.Tick += delegate {
+                    connectElapsedMs += 400;
+                    int state; try { state = Convert.ToInt32(c.Connected); } catch { state = -1; }
+                    if (state == 1) { connectWatch.Stop(); Emit("connected", "Conectado por RDP."); return; }
+                    if (state == 2) wasConnecting = true;
+                    else if (state == 0 && wasConnecting) {
+                        connectWatch.Stop();
+                        Emit("error", "A conexão RDP foi recusada ou encerrada pelo servidor. Verifique usuário/senha e se a Área de Trabalho Remota está habilitada.");
+                        Close(); return;
+                    }
+                    if (connectElapsedMs >= 25000) {
+                        connectWatch.Stop();
+                        Emit("error", "Tempo limite ao conectar por RDP. Verifique o endereço, a porta e a rede até o servidor.");
+                        Close();
+                    }
+                };
+                connectWatch.Start();
             }
         } catch (Exception ex) { Emit("error", ex.Message); }
     }
