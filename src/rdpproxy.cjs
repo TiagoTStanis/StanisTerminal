@@ -128,13 +128,18 @@ async function performRDPHandshake(host, port, x224Request, options = {}) {
       tcpSocket.removeAllListeners('error');
       // Servidores RDP usam certificado autoassinado por padrão — rejectUnauthorized:false aceita
       // qualquer certificado (igual à autenticação nível 2 que já usávamos com o ActiveX do Windows).
-      // minVersion baixo + SECLEVEL=0: máxima compatibilidade — alguns servidores RDP mais antigos
-      // (ou com Enhanced RDP Security configurado de forma legada) só falam TLS 1.0/1.1, e a política
-      // padrão do OpenSSL moderno recusa isso sem essa flexibilização explícita.
-      const tlsSocket = tls.connect({ socket: tcpSocket, rejectUnauthorized: false, minVersion: 'TLSv1', ciphers: 'DEFAULT@SECLEVEL=0' }, () => {
-        tcpSocket.setTimeout(0); tcpSocket.setNoDelay(true); tcpSocket.setKeepAlive(true, 10000);
-        settle(null, { x224Response: Buffer.from(x224Response), certChain: certChainOf(tlsSocket), tlsSocket });
-      });
+      // minVersion baixo: alguns servidores RDP mais antigos (ou com Enhanced RDP Security configurado
+      // de forma legada) só falam TLS 1.0/1.1. Sem "ciphers" customizado: o Electron empacotado usa
+      // BoringSSL, que não entende a sintaxe "@SECLEVEL=n" do OpenSSL (derrubava o processo principal
+      // inteiro com uma exceção não capturada — tls.connect() pode lançar de forma síncrona ao montar
+      // o contexto TLS, por isso o try/catch aqui, não só o listener de 'error').
+      let tlsSocket;
+      try {
+        tlsSocket = tls.connect({ socket: tcpSocket, rejectUnauthorized: false, minVersion: 'TLSv1' }, () => {
+          tcpSocket.setTimeout(0); tcpSocket.setNoDelay(true); tcpSocket.setKeepAlive(true, 10000);
+          settle(null, { x224Response: Buffer.from(x224Response), certChain: certChainOf(tlsSocket), tlsSocket });
+        });
+      } catch (error) { tcpSocket.destroy(); settle(new Error(`Configuração de TLS inválida: ${error.message}`)); return; }
       tlsSocket.once('error', error => settle(new Error(`Handshake TLS falhou: ${error.message}`)));
     });
     tcpSocket.setTimeout(options.readyTimeout || 15000, () => { tcpSocket.destroy(); settle(new Error('Tempo limite ao conectar por RDP.')); });

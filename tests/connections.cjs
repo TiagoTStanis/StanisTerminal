@@ -222,6 +222,23 @@ function sftpServer(sftp) {
     await page.waitForFunction(() => document.querySelector('.graphic-mount canvas.rdp-canvas'), { timeout: 15000 });
     await page.waitForFunction(() => document.querySelector('#status').textContent.startsWith('RDP:'), { timeout: 15000 });
     console.log('PASS: sessão RDP real pela UI carrega o ironrdp-wasm, cria o canvas e reporta erro de conexão de forma limpa (sem exceção).');
+    // Cobre especificamente o crash relatado em produção: tls.connect() com uma config de cifra que o
+    // BoringSSL do Electron empacotado rejeita derrubava o processo principal inteiro (exceção síncrona
+    // não capturada). Só dá pra reproduzir isso rodando dentro do Electron de verdade (não no Node do
+    // sistema, que usa OpenSSL) — por isso esse teste roda via electron.launch(), não como unidade pura.
+    // Um servidor TCP fake que responde a qualquer byte já é suficiente para o proxy chegar em
+    // tls.connect(); não precisa completar o handshake — só não pode derrubar o app.
+    const tlsProbe = net.createServer(socket => { socket.once('data', () => socket.write(Buffer.from('resposta-x224-fake'))); });
+    const tlsProbePort = await listen(tlsProbe);
+    await page.click('#new-session'); await page.locator('[name=name]').fill('RDP TLS fake'); await page.locator('[name=type]').selectOption('rdp'); await page.locator('[name=host]').fill('127.0.0.1'); await page.locator('[name=username]').fill('tester');
+    await page.locator('#dialog-advanced summary').click(); await page.locator('[name=port]').fill(String(tlsProbePort)); await page.click('#dialog-ok');
+    await page.locator('.tree-row.session .tree-main').filter({ hasText: 'RDP TLS fake' }).click();
+    await page.locator('#form-dialog [name=password]').fill('qualquer-senha'); await page.click('#dialog-ok');
+    await page.waitForFunction(() => document.querySelectorAll('.graphic-mount canvas.rdp-canvas').length === 2, { timeout: 15000 });
+    const appStillAlive = await app.evaluate(() => true).catch(() => false);
+    assert.ok(appStillAlive, 'o processo principal do Electron não pode cair quando o handshake TLS do RDP falha.');
+    tlsProbe.close();
+    console.log('PASS: tls.connect() do proxy RDP com um servidor que responde mas não fala TLS não derruba o processo principal.');
     await page.click('#new-session'); await page.locator('[name=name]').fill('X11 laboratório'); await page.locator('[name=type]').selectOption('x11'); await page.click('#dialog-ok');
     await page.locator('.tree-row.session .tree-main').filter({ hasText: 'X11 laboratório' }).click();
     await page.waitForSelector('.tab:has-text("X11 laboratório")', { timeout: 30000 });

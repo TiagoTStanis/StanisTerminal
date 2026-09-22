@@ -33,6 +33,13 @@ if (!testMode && !app.requestSingleInstanceLock()) app.quit();
 app.on('second-instance', () => { if (window) { if (window.isMinimized()) window.restore(); window.focus(); } });
 let window, config, terminals, files, network, graphics, transfers, tools, vault, packages, msys, remoteFiles;
 const questions = new Map();
+// Rede de segurança: um erro não tratado no processo principal (ex.: config de TLS que o BoringSSL do
+// Electron rejeita) por padrão derruba o app inteiro, fechando todas as sessões abertas. Registra e
+// segue — muito melhor que perder tudo por causa de um erro isolado numa única conexão.
+process.on('uncaughtException', error => {
+  console.error('Exceção não tratada no processo principal:', error);
+  try { fs.appendFileSync(path.join(app.getPath('userData'), 'crash.log'), `[${new Date().toISOString()}] ${error.stack || error.message}\n`); } catch { /* userData pode não estar pronto ainda */ }
+});
 const emit = (channel, value) => { if (window && !window.isDestroyed()) window.webContents.send(channel, value); };
 function ask(question) {
   return new Promise(resolve => {
