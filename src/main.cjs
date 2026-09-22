@@ -204,6 +204,12 @@ function register() {
   handle('graphics:bounds', (id, bounds) => graphics.bounds(id, bounds));
   handle('graphics:close', id => { const item = graphics.items.get(id); graphics.close(id); if (item) remoteFiles.close(item.profile.id); });
   handle('network:filesOpen', id => { const item = graphics.items.get(id); if (!item) throw new Error('Sessão gráfica não encontrada.'); return remoteFiles.open(item.profile); });
+  handle('rdp:log', () => {
+    const file = path.join(app.getPath('userData'), 'rdp-proxy.log');
+    if (!fs.existsSync(file)) return 'Nenhuma tentativa de conexão RDP registrada ainda.';
+    const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
+    return lines.slice(-40).join('\n');
+  });
   handle('serial:list', () => SerialPort.list());
   handle('clipboard:read', () => clipboard.readText());
   handle('clipboard:write', value => { if (typeof value === 'string' && value.length < 5000000) clipboard.writeText(value); });

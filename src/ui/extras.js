@@ -268,6 +268,7 @@ export function setup(ctx) {
     const result = await call(op === 'install' ? 'tools:install' : 'tools:remove', id);
     return result.map(t => `${t.installed ? '✔ instalado' : '○ não instalado'}  ${t.name} — origem: ${t.source}`).join(' | ');
   });
+  tool('Registro de conexões RDP', 'Mostra as últimas tentativas de conexão e o motivo de falhas', async () => call('rdp:log'));
   tool('Sincronizar (enviar)', 'Gravar sessões, macros e comandos na pasta de sincronização', async () => `Salvo em ${await call('sync:push')}`);
   tool('Sincronizar (receber)', 'Mesclar a pasta de sincronização com este computador', async () => { state().config = await call('sync:pull'); ctx.refresh(); return 'Sessões, comandos rápidos e macros atualizados. Senhas nunca são sincronizadas.'; });
 
@@ -276,7 +277,7 @@ export function setup(ctx) {
     ['Diagnóstico', ['Ping', 'Consulta DNS', 'Traceroute', 'Teste TCP', 'Portas seriais', 'SHA-256', 'Varredura de portas', 'Wake-on-LAN']],
     ['Túneis e espelho', ['Túnel SSH local', 'Proxy SOCKS5 (ssh -D)', 'Túnel SSH remoto (ssh -R)', 'Espelhar pasta (local → servidor)', 'Enviar por ZMODEM (rz)', 'Baixar por ZMODEM (sz)']],
     ['Servidores locais', ['Servidor HTTP local', 'Servidor TFTP', 'Servidor FTP', 'Servidor SFTP', 'Servidor VNC (compartilhar esta tela)']],
-    ['Chaves e sessões', ['Gerar chave SSH', 'Exportar sessões', 'Importar sessões', 'Sincronizar (enviar)', 'Sincronizar (receber)']],
+    ['Chaves e sessões', ['Gerar chave SSH', 'Exportar sessões', 'Importar sessões', 'Registro de conexões RDP', 'Sincronizar (enviar)', 'Sincronizar (receber)']],
     ['Sistema', ['Ferramentas verificadas', 'Ajuda rápida']]
   ];
   const grid = $('tool-grid'); const byName = new Map([...grid.children].map(el => [el.firstChild?.textContent, el]));

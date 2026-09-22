@@ -7,6 +7,19 @@
 // completa o handshake normalmente (inclusive TLS 1.3) contra certificados autoassinados típicos de RDP.
 const net = require('node:net');
 const tls = require('node:tls');
+const fs = require('node:fs');
+const path = require('node:path');
+
+// Log próprio (rdp-proxy.log na pasta de dados do app): o erro real da conexão nunca chega no
+// cliente WASM — o RDCleanPath só carrega um código genérico (ver handleConnection) — então sem
+// isso não há como saber por que uma conexão RDP falhou.
+let logFile = null;
+function log(message) {
+  try {
+    if (!logFile) logFile = path.join(require('electron').app.getPath('userData'), 'rdp-proxy.log');
+    fs.appendFileSync(logFile, `[${new Date().toISOString()}] ${message}\n`);
+  } catch { /* sem Electron disponível (ex.: testes) — ignora */ }
+}
 
 const VERSION_1 = 3390; // 3389 + 1
 const TAG_SEQUENCE = 0x30, TAG_INTEGER = 0x02, TAG_OCTET_STRING = 0x04, TAG_UTF8STRING = 0x0c;
@@ -115,7 +128,10 @@ async function performRDPHandshake(host, port, x224Request, options = {}) {
       tcpSocket.removeAllListeners('error');
       // Servidores RDP usam certificado autoassinado por padrão — rejectUnauthorized:false aceita
       // qualquer certificado (igual à autenticação nível 2 que já usávamos com o ActiveX do Windows).
-      const tlsSocket = tls.connect({ socket: tcpSocket, rejectUnauthorized: false, minVersion: 'TLSv1.2' }, () => {
+      // minVersion baixo + SECLEVEL=0: máxima compatibilidade — alguns servidores RDP mais antigos
+      // (ou com Enhanced RDP Security configurado de forma legada) só falam TLS 1.0/1.1, e a política
+      // padrão do OpenSSL moderno recusa isso sem essa flexibilização explícita.
+      const tlsSocket = tls.connect({ socket: tcpSocket, rejectUnauthorized: false, minVersion: 'TLSv1', ciphers: 'DEFAULT@SECLEVEL=0' }, () => {
         tcpSocket.setTimeout(0); tcpSocket.setNoDelay(true); tcpSocket.setKeepAlive(true, 10000);
         settle(null, { x224Response: Buffer.from(x224Response), certChain: certChainOf(tlsSocket), tlsSocket });
       });
@@ -133,13 +149,17 @@ function setupTlsRelay(ws, tlsSocket) {
 }
 function handleConnection(ws, options = {}) {
   ws.once('message', async data => {
+    let destination = '?';
     try {
       const request = parseRDCleanPathRequest(Buffer.isBuffer(data) ? data : Buffer.from(data));
+      destination = request.destination;
       const { host, port } = parseDestination(request.destination);
       const { x224Response, certChain, tlsSocket } = await performRDPHandshake(host, port, request.x224ConnectionRequest, options);
+      log(`OK ${destination}`);
       ws.send(buildRDCleanPathResponse(`${host}:${port}`, x224Response, certChain));
       setupTlsRelay(ws, tlsSocket);
     } catch (error) {
+      log(`FALHA ${destination}: ${error.message}`);
       try { ws.send(buildRDCleanPathError(1, 502)); } catch { /* WS já fechado */ }
       try { ws.close(); } catch { /* já fechado */ }
     }
