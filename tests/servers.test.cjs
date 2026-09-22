@@ -100,7 +100,7 @@ test('fila de transferências envia e baixa pastas inteiras por SFTP', async () 
   const down = await wait(t.add({ kind: 'sftp', id: 'x', direction: 'download', local: dest, remote: '/pasta' }));
   assert.strictEqual(down.status, 'concluída', down.error); assert.strictEqual(fs.readFileSync(path.join(dest, 'a.txt'), 'utf8'), 'A'); assert.strictEqual(fs.readFileSync(path.join(dest, 'sub', 'b.txt'), 'utf8'), 'B');
   const cancelled = t.add({ kind: 'sftp', id: 'x', direction: 'upload', local: src, remote: '/pasta2' }); t.cancel(cancelled); await wait(cancelled);
-  assert.throws(() => t.add({ kind: 'local', id: 'x', direction: 'upload', local: src, remote: '/x' }));
+  assert.throws(() => t.add({ kind: 'bogus', id: 'x', direction: 'upload', local: src, remote: '/x' }));
   client.end(); net_.closeAll();
 });
 

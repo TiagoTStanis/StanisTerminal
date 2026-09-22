@@ -41,6 +41,7 @@ function profile(input) {
     if (p.type === 'rsh') p.command = text(input.command || '', 4096);
     p.keyPath = text(input.keyPath || '', 2048); p.useAgent = !!input.useAgent; p.agentForward = !!input.useAgent && !!input.agentForward;
     p.jumpId = text(input.jumpId || '', 80); if (input.proxyHost) { if (p.jumpId) throw new Error('Use gateway SSH ou proxy SOCKS5, não os dois.'); p.proxyHost = host(input.proxyHost); p.proxyPort = port(input.proxyPort, 1080); }
+    if (p.type === 'vnc' && ['windows', 'linux'].includes(input.remoteOS)) p.remoteOS = input.remoteOS;
   }
   return p;
 }

@@ -57,6 +57,7 @@ class Files {
     else throw new Error('Editor não disponível para FTP.');
   }
   async transfer(kind, id, direction, local, remote) {
+    if (kind === 'local') return direction === 'upload' ? fs.copyFile(local, remote) : fs.copyFile(remote, local);
     if (kind === 'sftp') return sftpCall(await this.remote(id), direction === 'upload' ? 'fastPut' : 'fastGet', direction === 'upload' ? local : remote, direction === 'upload' ? remote : local);
     const ftp = this.ftp.get(id); if (!ftp) throw new Error('FTP desconectado.');
     if (direction === 'upload') await ftp.uploadFrom(local, remote); else await ftp.downloadTo(local, remote);

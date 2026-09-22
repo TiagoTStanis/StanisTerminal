@@ -10,7 +10,7 @@ class Transfers {
   list() { return [...this.jobs.values()].map(({ id, name, direction, status, done, total, error }) => ({ id, name, direction, status, done, total, error })); }
   push() { this.emit('transfer:state', this.list()); }
   add({ kind, id, direction, local, remote }) {
-    if (!['sftp', 'ftp'].includes(kind)) throw new Error('Transferência disponível para SFTP e FTP.');
+    if (!['sftp', 'ftp', 'local'].includes(kind)) throw new Error('Transferência disponível para SFTP, FTP e Rede.');
     if (!['upload', 'download'].includes(direction)) throw new Error('Direção inválida.');
     const job = { id: randomUUID(), kind, session: id, direction, local, remote, name: path.basename(direction === 'upload' ? local : remote) || remote, status: 'na fila', done: 0, total: 0, cancelled: false };
     this.jobs.set(job.id, job); this.push(); this.next(); return job.id;
@@ -31,6 +31,10 @@ class Transfers {
   }
   async run(job) {
     const stat = job.direction === 'upload' ? await fs.stat(job.local) : null;
+    if (job.kind === 'local') {
+      const [from, to] = job.direction === 'upload' ? [job.local, job.remote] : [job.remote, job.local];
+      await fs.cp(from, to, { recursive: true }); job.done = job.total = 1; return;
+    }
     if (job.kind === 'sftp') {
       const sftp = await this.files.remote(job.session);
       if (job.direction === 'upload') return stat.isDirectory() ? this.uploadTree(job, sftp) : this.tick(job, await this.putOne(job, sftp, job.local, job.remote));

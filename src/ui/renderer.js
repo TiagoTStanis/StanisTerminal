@@ -12,7 +12,7 @@ const api = window.api;
 const call = (name, ...args) => api.call(name, ...args);
 let state, activeId, split = false, toastTimer, editor = null, extras = null;
 const sessions = new Map();
-const fileState = { kind: 'local', id: '', path: '', parent: '' };
+const fileState = { kind: 'local', id: '', path: '', parent: '', network: false };
 const dialogQueue = [];
 let currentDialog = null;
 const PALETTES = {
@@ -155,9 +155,16 @@ async function openSession(profile) {
       item.rfb.addEventListener('connect', () => toast('VNC conectado.'));
       item.rfb.addEventListener('disconnect', event => { item.ended = true; toast(event.detail.clean ? 'VNC desconectado.' : 'Conexão VNC interrompida.'); renderTabs(); });
       item.rfb.addEventListener('securityfailure', event => toast(event.detail.reason || 'Autenticação VNC falhou.'));
+      item.rfb.addEventListener('clipboard', event => safe(() => call('clipboard:write', event.detail.text))());
+      const sendClipboard = () => safe(async () => { const text = await call('clipboard:read'); if (text) item.rfb.clipboardPasteFrom(text); })();
+      item.mount.addEventListener('keydown', event => {
+        if (event.ctrlKey && event.shiftKey && event.code === 'KeyV') { event.preventDefault(); sendClipboard(); }
+      }, true);
+      item.mount.addEventListener('paste', event => { event.preventDefault(); safe(() => item.rfb.clipboardPasteFrom(event.clipboardData.getData('text/plain')))(); }, true);
       const bar = elem('div', '', 'graphic-toolbar');
       bar.append(
         button('⌨ Ctrl+Alt+Del', () => item.rfb.sendCtrlAltDel()),
+        button('📋 Colar texto', sendClipboard),
         button('⛶ Tela cheia', () => item.pane.requestFullscreen())
       );
       item.pane.append(bar);
@@ -256,18 +263,26 @@ $('editor-save').onclick = safe(async () => {
 async function closeEditor() { if (editor && $('editor-text').value !== editor.original && !await form({ title: 'Descartar alterações?', fields: [], accept: 'Descartar' })) return; $('editor-dialog').close(); editor = null; updateNativeBounds(); }
 $('editor-close').onclick = safe(closeEditor); $('editor-dialog').addEventListener('cancel', event => { event.preventDefault(); safe(closeEditor)(); });
 async function setFileMode(kind) {
-  if (kind === 'sftp') { const item = current(); if (!['ssh', 'ssh-x11'].includes(item?.profile.type) || item.ended) throw new Error('Selecione uma aba SSH ativa.'); fileState.id = item.id; }
-  if (kind === 'ftp') {
+  fileState.network = false;
+  if (kind === 'network') {
+    const item = current();
+    if (!['vnc', 'rdp'].includes(item?.profile.type) || item.ended) throw new Error('Selecione uma sessão VNC ou RDP ativa.');
+    toast('Conectando à rede do host…');
+    const result = await call('network:filesOpen', item.id);
+    fileState.network = true; fileState.id = result.id; fileState.path = result.path; kind = result.kind;
+  } else if (kind === 'sftp') { const item = current(); if (!['ssh', 'ssh-x11'].includes(item?.profile.type) || item.ended) throw new Error('Selecione uma aba SSH ativa.'); fileState.id = item.id; fileState.path = '.'; }
+  else if (kind === 'ftp') {
     const options = await form({ title: 'FTP / FTPS', fields: [{ name: 'host', label: 'Servidor', required: true }, { name: 'port', label: 'Porta', type: 'number', value: 21 }, { name: 'username', label: 'Usuário', value: 'anonymous' }, { name: 'secure', label: 'Usar TLS (FTPS explícito)', type: 'checkbox', value: true }] });
-    if (!options) return; fileState.id = await call('files:ftp', options);
-  }
-  fileState.kind = kind; extras?.fileMode(kind); fileState.path = kind === 'local' ? state.home : kind === 'sftp' ? '.' : '/';
-  for (const type of ['local', 'sftp', 'ftp']) $('files-' + type).classList.toggle('selected', kind === type);
-  $('files-upload').hidden = kind === 'local'; $('files-mkdir').hidden = kind === 'ftp'; await loadFiles();
+    if (!options) return; fileState.id = await call('files:ftp', options); fileState.path = '/';
+  } else fileState.path = state.home;
+  fileState.kind = kind; extras?.fileMode(kind);
+  for (const type of ['local', 'sftp', 'ftp']) $('files-' + type).classList.toggle('selected', !fileState.network && kind === type);
+  $('files-network').classList.toggle('selected', fileState.network);
+  $('files-upload').hidden = kind === 'local' && !fileState.network; $('files-mkdir').hidden = kind === 'ftp'; await loadFiles();
 }
 $('toggle-files').onclick = safe(async () => { $('file-panel').hidden = !$('file-panel').hidden; layout(); if (!$('file-panel').hidden) await loadFiles(fileState.path || state.home); });
 $('close-files').onclick = () => { $('file-panel').hidden = true; layout(); };
-for (const kind of ['local', 'sftp', 'ftp']) $('files-' + kind).onclick = safe(() => setFileMode(kind));
+for (const kind of ['local', 'sftp', 'ftp', 'network']) $('files-' + kind).onclick = safe(() => setFileMode(kind));
 $('files-up').onclick = safe(() => loadFiles(fileState.parent)); $('files-refresh').onclick = safe(() => loadFiles());
 $('file-path').onkeydown = event => { if (event.key === 'Enter') safe(() => loadFiles(event.target.value))(); };
 $('files-upload').onclick = safe(async () => { toast('Preparando envio…'); const result = await call('files:transfer', fileState.kind, fileState.id, 'upload', fileState.path); if (result) { toast('Transferência concluída.'); await loadFiles(); } });

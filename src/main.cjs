@@ -15,6 +15,7 @@ const { Transfers } = require('./transfers.cjs');
 const { Mirror } = require('./mirror.cjs');
 const { Tools } = require('./tools.cjs');
 const { Vault } = require('./vault.cjs');
+const { RemoteFiles } = require('./remotefiles.cjs');
 const { scanImports, importFile, prepareImport } = require('./importers.cjs');
 const { uploadZmodem, downloadZmodem } = require('./zmodemio.cjs');
 const { Packages, ID: PACKAGE_ID } = require('./packages.cjs');
@@ -30,7 +31,7 @@ else if (process.env.PORTABLE_EXECUTABLE_DIR) app.setPath('userData', path.join(
 else if (app.isPackaged) app.setPath('userData', path.join(path.dirname(app.getPath('exe')), 'StanisTerminal-data'));
 if (!testMode && !app.requestSingleInstanceLock()) app.quit();
 app.on('second-instance', () => { if (window) { if (window.isMinimized()) window.restore(); window.focus(); } });
-let window, config, terminals, files, network, graphics, transfers, tools, vault, packages, msys;
+let window, config, terminals, files, network, graphics, transfers, tools, vault, packages, msys, remoteFiles;
 const questions = new Map();
 const emit = (channel, value) => { if (window && !window.isDestroyed()) window.webContents.send(channel, value); };
 function ask(question) {
@@ -199,7 +200,8 @@ function register() {
   handle('graphics:activate', id => graphics.activate(id));
   handle('graphics:write', (id, data) => { if (typeof data === 'string' && data.length < 1000000) graphics.write(id, data); });
   handle('graphics:bounds', (id, bounds) => graphics.bounds(id, bounds));
-  handle('graphics:close', id => graphics.close(id));
+  handle('graphics:close', id => { const item = graphics.items.get(id); graphics.close(id); if (item) remoteFiles.close(item.profile.id); });
+  handle('network:filesOpen', id => { const item = graphics.items.get(id); if (!item) throw new Error('Sessão gráfica não encontrada.'); return remoteFiles.open(item.profile); });
   handle('serial:list', () => SerialPort.list());
   handle('clipboard:read', () => clipboard.readText());
   handle('clipboard:write', value => { if (typeof value === 'string' && value.length < 5000000) clipboard.writeText(value); });
@@ -366,6 +368,7 @@ app.whenReady().then(async () => {
       if (id === 'msys2') await new Promise((resolve, reject) => execFile(file, ['-lc', 'exit'], { env: { ...process.env, MSYSTEM: 'MSYS', CHERE_INVOKING: '1' }, windowsHide: true, timeout: 600000 }, error => error ? reject(new Error('Não foi possível inicializar o MSYS2: ' + error.message)) : resolve()));
     } });
     packages = new Packages(emit); msys = new MsysPackages(emit, () => tools.installed('msys2') ? path.join(tools.root, 'msys2', 'msys64') : null); terminals.toolPath = id => tools.file(id); network = new Network(terminals, emit); vault = new Vault(config.directory, safeStorage); graphics = new Graphics(window, emit, ask, app.isPackaged, vault, id => config.value.profiles.some(p => p.id === id));
+    remoteFiles = new RemoteFiles(terminals, ssh, vault, ask, config);
     terminals.getX11 = () => graphics.getX11();
     if (tools.installed('tightvnc')) cleanupStale(tools.file('tightvnc')).catch(() => {});
     register();
@@ -376,7 +379,7 @@ app.whenReady().then(async () => {
         dialog.showMessageBox(window, { type: 'question', message: 'Encerrar o aplicativo e todas as sessões?', buttons: ['Continuar trabalhando', 'Encerrar'], defaultId: 0, cancelId: 0 }).then(result => { if (result.response === 1) { closing = true; window.close(); } });
       }
     });
-    window.on('closed', () => { terminals.closeAll(); graphics.closeAll(); packages?.closeAll(); msys?.closeAll(); files.closeAll(); network.closeAll(); for (const q of questions.values()) { clearTimeout(q.timer); q.resolve(null); } questions.clear(); app.quit(); });
+    window.on('closed', () => { remoteFiles?.closeAll(); terminals.closeAll(); graphics.closeAll(); packages?.closeAll(); msys?.closeAll(); files.closeAll(); network.closeAll(); for (const q of questions.values()) { clearTimeout(q.timer); q.resolve(null); } questions.clear(); app.quit(); });
     await window.loadURL('stanis://app/index.html'); window.show();
   } catch (error) { console.error(error); dialog.showErrorBox('Stanis Terminal', error.message); app.quit(); }
 });
