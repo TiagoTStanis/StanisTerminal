@@ -1,6 +1,6 @@
 {
   "name": "stanis-terminal",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "Terminal local para Windows, sem IA, com sessões e ferramentas de infraestrutura.",
   "main": "src/main.cjs",
   "author": "Tiago Torres Stanis",
@@ -106,7 +106,7 @@
       "signExecutable": false
     },
     "portable": {
-      "artifactName": "StanisTerminal-${version}-win-x64.exe"
+      "artifactName": "StanisTerminal-${version}-win-x64-PORTATIL-LENTO-usar-o-zip.exe"
     }
   }
 }
