@@ -11,9 +11,9 @@ Legenda: ✅ tem · 🟡 parcial · ❌ não tem · ➖ não se aplica · **?** 
 | SSH (senha, chave, keyboard-interactive) | ✅ | ✅ | ✅ |
 | SSH gateway / ProxyJump | ✅ | ✅ | ✅ |
 | Agente SSH | ✅ (agente do Windows) | ? | ✅ |
-| Encaminhamento do agente | 🟡 (opção a ligar) | ? | ✅ |
-| Proxy SOCKS/HTTP para conectar | 🟡 | ✅ (SOCKS) | ✅ (HTTP, SOCKS5) |
-| ProxyCommand | ❌ (executa comando local; risco de segurança) | ? | ✅ |
+| Encaminhamento do agente | 🟡 (opção existe; sem teste contra servidor real) | ? | ✅ |
+| Proxy SOCKS/HTTP para conectar | ✅ (SOCKS5, testado) | ✅ (SOCKS) | ✅ (HTTP, SOCKS5) |
+| ProxyCommand | ❌ (decisão deliberada: risco de execução arbitrária; o SOCKS5 cobre o caso comum) | ? | ✅ |
 | Telnet | ✅ | ✅ | ✅ |
 | Rlogin / Rsh | ✅ (sem teste contra servidor real) | ✅ | ? |
 | Serial | 🟡 (8N1; sem paridade/fluxo) | ✅ | ✅ |
@@ -21,8 +21,8 @@ Legenda: ✅ tem · 🟡 parcial · ❌ não tem · ➖ não se aplica · **?** 
 | VNC | ✅ (cliente noVNC + servidor TightVNC) | ✅ | ❌ |
 | XDMCP / servidor X11 | ✅ (VcXsrv) | ✅ | 🟡 (só X11 forwarding) |
 | FTP / FTPS / SFTP | ✅ | ✅ | SFTP |
-| SCP | ❌ (SFTP cobre) | ✅ | ✅ |
-| XMODEM / YMODEM / ZMODEM | ❌ | ? | ✅ |
+| SCP | ❌ (decisão: SFTP já cobre o caso de uso) | ✅ | ✅ |
+| XMODEM / YMODEM / ZMODEM | ❌ (exige canal binário; ver `docs/PLANO.md`) | ? | ✅ |
 | Túneis local / remoto / dinâmico | ✅ | ✅ | ✅ |
 | tmux integrado | ❌ | ? | ✅ |
 
@@ -37,9 +37,9 @@ Legenda: ✅ tem · 🟡 parcial · ❌ não tem · ➖ não se aplica · **?** 
 | Autocompletar / histórico | 🟡 (sugestões do histórico) | 🟡 (Ctrl+R) | ✅ |
 | Paleta de comandos | ❌ | ? | ✅ |
 | Realce de palavras-chave | ❌ | ✅ | ? |
-| Links clicáveis | ❌ | ✅ (Ctrl+clique) | ? |
+| Links clicáveis | ✅ (com confirmação antes de abrir) | ✅ (Ctrl+clique) | ? |
 | Unicode 13 / emoji | 🟡 | ? | ✅ |
-| Restaurar sessões ao abrir | ❌ | ? | ✅ |
+| Restaurar sessões ao abrir | ✅ (opcional; testado com reinício real do app) | ? | ✅ |
 | Temas / cores | ✅ (6 temas) | ? | ✅ |
 
 ## Arquivos, servidores e ferramentas
@@ -51,11 +51,11 @@ Legenda: ✅ tem · 🟡 parcial · ❌ não tem · ➖ não se aplica · **?** 
 | Transferência de pastas com fila | ✅ | ? | ? |
 | Editor de texto remoto | ✅ (UTF-8, até 2 MiB) | ✅ | ? |
 | Servidores locais (HTTP/TFTP/FTP/SFTP/VNC) | ✅ (só 127.0.0.1) | ✅ | ❌ |
-| Ambiente Unix + gerenciador de pacotes | ✅ (MSYS2 + pacman) | ✅ (MobApt) | ❌ |
+| Ambiente Unix + gerenciador de pacotes | ✅ (MSYS2 + pacman, testado de ponta a ponta) | ✅ (MobApt) | ❌ |
 | Pacotes do Windows (winget) + listas | ✅ | ❌ | ❌ |
 | Ferramentas de rede (ping, DNS, traceroute, TCP) | ✅ | ✅ | ? |
-| Varredura de portas / de rede | ❌ | ✅ | ? |
-| Wake-on-LAN | ❌ | ✅ | ? |
+| Varredura de portas | ✅ (TCP connect) | ✅ | ? |
+| Wake-on-LAN | ✅ | ✅ | ? |
 | Gerador de chaves | 🟡 (RSA 3072) | ✅ (MobaKeyGen) | ? |
 
 ## Sessões e segurança
@@ -64,8 +64,8 @@ Legenda: ✅ tem · 🟡 parcial · ❌ não tem · ➖ não se aplica · **?** 
 |---|---|---|---|
 | Pastas e subpastas de sessões | ✅ | ✅ (barra lateral) | ✅ |
 | Sincronização de sessões | 🟡 (por pasta, manual) | ? | ? |
-| Importar de PuTTY / `~/.ssh/config` | ❌ | ? | ? |
-| Senha mestra / bloqueio de tela | ❌ (senhas protegidas pelo Windows) | ✅ (senha mestra) | ✅ (bloqueio de tela) |
+| Importar de PuTTY / `~/.ssh/config` | ✅ (`~/.ssh/config` testado; PuTTY sem dados reais para testar) | ? | ? |
+| Senha mestra / bloqueio de tela | ✅ (senha mestra + bloqueio automático, testado) | ✅ (senha mestra) | ✅ (bloqueio de tela) |
 | Assinatura de editor no executável | ❌ (assinatura GPG do release) | ? | ? |
 | Telemetria / conta / nuvem | Nenhuma | ? | ? |
 | Licença | MIT (código aberto) | Gratuito + Professional | Gratuito; parte do código aberto |
@@ -76,6 +76,7 @@ Legenda: ✅ tem · 🟡 parcial · ❌ não tem · ➖ não se aplica · **?** 
 - Scripts em Lua com sandbox e limites de instrução e memória.
 - Verificação por hash e assinatura de tudo o que baixa (BusyBox, TightVNC, MSYS2).
 - Servidores locais presos a 127.0.0.1 e somente leitura por padrão.
+- Ambiente Unix completo (MSYS2 + pacman) e gerenciador do Windows (winget) na mesma tela de Pacotes.
 
 ## Onde ainda perde
 - **Maturidade:** ambos têm anos de uso; este projeto é novo e vários caminhos ainda não foram testados contra servidores reais (RDP, agente SSH, painel que segue o terminal).

@@ -2,7 +2,7 @@
 
 Para abrir mais rápido, use **Stanis Terminal.exe** na pasta **StanisTerminal** da entrega, ou o atalho na Área de Trabalho. Essa pasta já contém todos os componentes; mantenha os arquivos juntos.
 
-Também há a versão de arquivo único **StanisTerminal-1.2.0-win-x64.exe**. Ela extrai os componentes antes de abrir e pode levar cerca de um minuto nesta máquina. Deixe o programa em uma pasta sua, como Documentos, com espaço livre e permissão de escrita.
+Também há a versão de arquivo único **StanisTerminal-1.3.0-win-x64.exe**. Ela extrai os componentes antes de abrir e pode levar cerca de um minuto nesta máquina. Deixe o programa em uma pasta sua, como Documentos, com espaço livre e permissão de escrita.
 
 ## Minha primeira conexão
 

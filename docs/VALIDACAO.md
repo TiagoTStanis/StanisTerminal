@@ -1,4 +1,4 @@
-# Validação da versão 1.2.0
+# Validação da versão 1.3.0
 
 Ambiente: Windows x64 desta máquina. Os testes de conexão usam servidores temporários em `127.0.0.1`; nenhum servidor da empresa é acessado.
 
@@ -29,11 +29,21 @@ Rode `pnpm test`, `pnpm test:ui`, `pnpm test:extras`, `pnpm test:organize`, `pnp
 - Abas separadas na tela de Pacotes para Windows (winget) e Unix (MSYS2), cada uma com busca, instalados, atualizações e listas.
 - Release assinado com GPG (chave dedicada); veja `docs/VERIFICAR-ASSINATURA.md`.
 
+## Novidades da 1.3.0: o que foi testado
+
+- Links clicáveis no terminal (addon oficial do xterm.js), com confirmação antes de abrir no navegador padrão; só http/https.
+- Proxy SOCKS5 de saída para a conexão SSH: teste real com um servidor SOCKS5 e um servidor SSH, provando que o tráfego passa pelo proxy.
+- Varredura de portas (TCP connect) e Wake-on-LAN: testados contra um servidor TCP real e conferindo a estrutura exata do pacote mágico UDP.
+- Importar sessões do `~/.ssh/config` (Host, HostName, User, Port, IdentityFile, ProxyJump): testado com arquivo real, incluindo resolução do ProxyJump e limite de tamanho. A leitura do PuTTY (registro do Windows) foi testada apenas quanto a não quebrar quando não há sessões salvas (não havia PuTTY instalado nesta máquina).
+- Reabrir sessões ao iniciar (opcional) e senha mestra com bloqueio automático: testados de ponta a ponta pela interface real, incluindo reinício completo do processo do aplicativo, tentativa de senha errada, Escape não contornando o bloqueio, e remoção da senha exigindo a senha atual.
+
 ## Não verificado nesta máquina
 
 - Instalar, atualizar e remover programas de verdade pelo winget: instaladores podem pedir a confirmação do Windows (UAC), que o aplicativo não controla. (O pacman do MSYS2 foi testado de ponta a ponta e não pede UAC.)
 - Conexão RDP real com senha guardada (não há servidor RDP aqui; o controle inicializa e o cofre foi testado).
 - Agente SSH real do Windows (o serviço `ssh-agent` está desativado nesta máquina) e painel SFTP que segue o terminal com uma sessão SSH real.
+- Importação real de sessões do PuTTY (não havia PuTTY instalado nesta máquina para gerar dados reais).
+- Encaminhamento do agente SSH (`agentForward`) contra um servidor real que o utilize.
 - Abrir o shell BusyBox pela interface, e iniciar o servidor VNC pelo botão da interface (o caminho de código foi testado).
 
 ## O que depende do seu ambiente

@@ -39,8 +39,8 @@ function profile(input) {
     p.username = text(input.username || '', 128);
     if (p.username && !/^[a-zA-Z0-9_.@\\-]+$/.test(p.username)) throw new Error('Usuário inválido.');
     if (p.type === 'rsh') p.command = text(input.command || '', 4096);
-    p.keyPath = text(input.keyPath || '', 2048); p.useAgent = !!input.useAgent;
-    p.jumpId = text(input.jumpId || '', 80);
+    p.keyPath = text(input.keyPath || '', 2048); p.useAgent = !!input.useAgent; p.agentForward = !!input.useAgent && !!input.agentForward;
+    p.jumpId = text(input.jumpId || '', 80); if (input.proxyHost) { if (p.jumpId) throw new Error('Use gateway SSH ou proxy SOCKS5, não os dois.'); p.proxyHost = host(input.proxyHost); p.proxyPort = port(input.proxyPort, 1080); }
   }
   return p;
 }
@@ -58,7 +58,7 @@ class Config {
   constructor(directory) {
     this.directory = directory;
     this.file = path.join(directory, 'config.json');
-    this.value = readJSON(this.file, { version: 1, profiles: [], snippets: [], folders: [], macros: [], scripts: [], packageLists: [], tools: {}, settings: { fontSize: 14, theme: 'light', scrollback: 10000 } });
+    this.value = readJSON(this.file, { version: 1, profiles: [], snippets: [], folders: [], macros: [], scripts: [], packageLists: [], tools: {}, settings: { fontSize: 14, theme: 'light', scrollback: 10000, restoreSessions: false } });
     this.value.profiles = (this.value.profiles || []).map(profile);
   }
   save() { writeJSON(this.file, this.value); }

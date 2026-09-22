@@ -1,6 +1,7 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
+import { WebLinksAddon } from '@xterm/addon-web-links';
 import RFB from '@novnc/novnc';
 import { setup } from './extras.js';
 import { setupPackages } from './packages.js';
@@ -36,6 +37,7 @@ function showNextDialog() {
   $('dialog-title').textContent = spec.title;
   $('dialog-message').textContent = spec.message || '';
   $('dialog-ok').textContent = spec.accept || 'Confirmar';
+  $('dialog-cancel').hidden = $('dialog-x').hidden = !!spec.noCancel;
   const fields = [...(spec.fields || [])];
   if (spec.remember) fields.push({ name: 'remember', label: 'Guardar com criptografia da minha conta Windows', type: 'checkbox', wide: true });
   $('dialog-fields').replaceChildren();
@@ -56,7 +58,7 @@ function showNextDialog() {
   if (spec.onChange) { $('dialog-fields').onchange = () => spec.onChange($('dialog-form')); spec.onChange($('dialog-form')); } else $('dialog-fields').onchange = null;
   $('form-dialog').showModal(); updateNativeBounds();
 }
-function finishDialog(value) { if (!currentDialog) return; const { resolve } = currentDialog; currentDialog = null; $('form-dialog').close(); resolve(value); showNextDialog(); updateNativeBounds(); }
+function finishDialog(value) { if (!currentDialog) return; if (value === null && currentDialog.spec.noCancel) return; const { resolve } = currentDialog; currentDialog = null; $('form-dialog').close(); resolve(value); showNextDialog(); updateNativeBounds(); }
 $('dialog-form').onsubmit = event => { event.preventDefault(); const value = Object.fromEntries(new FormData(event.target)); for (const check of event.target.querySelectorAll('[type=checkbox]')) value[check.name] = check.checked; finishDialog(value); };
 $('dialog-cancel').onclick = $('dialog-x').onclick = () => finishDialog(null);
 $('form-dialog').addEventListener('cancel', event => { event.preventDefault(); finishDialog(null); });
@@ -76,13 +78,16 @@ async function sessionForm(existing = {}) {
     { name: 'password', label: state.secrets?.[existing.id] ? 'Senha (guardada; deixe vazio para manter)' : 'Senha (opcional; guardada com criptografia do Windows)', type: 'password', wide: true },
     { name: 'keyPath', label: 'Arquivo de chave privada SSH (opcional)', value: existing.keyPath || '', wide: true },
     { name: 'useAgent', label: 'Usar o agente SSH do Windows (chaves ficam no agente, sem senha)', type: 'checkbox', value: !!existing.useAgent, wide: true },
+    { name: 'agentForward', label: 'Encaminhar o agente para o servidor (permite pular deste servidor para outro com a mesma chave)', type: 'checkbox', value: !!existing.agentForward, wide: true },
+    { name: 'proxyHost', label: 'Proxy SOCKS5 para alcançar o servidor (opcional)', value: existing.proxyHost || '', wide: true },
+    { name: 'proxyPort', label: 'Porta do proxy', type: 'number', value: existing.proxyPort || 1080 },
     { name: 'jumpId', label: 'Gateway SSH (opcional)', value: existing.jumpId || '', wide: true, options: [{ value: '', label: 'Conexão direta' }, ...state.config.profiles.filter(p => p.type === 'ssh' && p.id !== existing.id).map(p => ({ value: p.id, label: p.name }))] },
     { name: 'newGroup', label: 'Ou criar nova pasta (use / para subpastas)', value: '', wide: true },
     { name: 'command', label: 'Comando remoto (Rsh)', value: existing.command || '', wide: true },
     { name: 'device', label: 'Porta serial', value: existing.device || 'COM1' }, { name: 'baudRate', label: 'Velocidade (baud)', type: 'number', value: existing.baudRate || 115200 }
   ], onChange: f => {
     const selected = f.elements.type.value;
-    const show = ['name', 'group', 'newGroup', 'type', ...(selected === 'x11' ? [] : selected === 'xdmcp' ? ['host'] : selected === 'local' ? ['shell', 'cwd'] : selected === 'serial' ? ['device', 'baudRate'] : ['ssh', 'ssh-x11'].includes(selected) ? ['host', 'port', 'username', 'password', 'keyPath', 'useAgent', 'jumpId'] : selected === 'rdp' ? ['host', 'port', 'username', 'password'] : selected === 'rlogin' ? ['host', 'port', 'username'] : selected === 'rsh' ? ['host', 'port', 'username', 'command'] : ['host', 'port'])];
+    const show = ['name', 'group', 'newGroup', 'type', ...(selected === 'x11' ? [] : selected === 'xdmcp' ? ['host'] : selected === 'local' ? ['shell', 'cwd'] : selected === 'serial' ? ['device', 'baudRate'] : ['ssh', 'ssh-x11'].includes(selected) ? ['host', 'port', 'username', 'password', 'keyPath', 'useAgent', 'agentForward', 'proxyHost', 'proxyPort', 'jumpId'] : selected === 'rdp' ? ['host', 'port', 'username', 'password'] : selected === 'rlogin' ? ['host', 'port', 'username'] : selected === 'rsh' ? ['host', 'port', 'username', 'command'] : ['host', 'port'])];
     for (const field of $('dialog-fields').children) { field.hidden = !show.includes(field.dataset.field); for (const input of field.querySelectorAll('input,select')) input.disabled = field.hidden; }
   } });
   if (!result) return;
@@ -91,6 +96,8 @@ async function sessionForm(existing = {}) {
 }
 let tree = null;
 function renderProfiles() { tree ??= setupTree({ $, call, form, toast, safe, elem, state: () => state, openSession, sessionForm, localProfile }); tree.render(); }
+let saveOpenTimer;
+function scheduleSaveOpen() { clearTimeout(saveOpenTimer); saveOpenTimer = setTimeout(() => call('session:saveOpen', [...sessions.values()].map(s => ({ profile: s.profile }))).catch(() => {}), 800); }
 async function openSession(profile) {
   if (sessions.size >= 24) throw new Error('Limite de 24 sessões nesta versão.');
   if (profile.type === 'local' && ['busybox', 'msys2'].includes(profile.shell)) { if (profile.shell === 'msys2') toast('Preparando o ambiente Unix (MSYS2). Na primeira vez pode levar alguns minutos…'); await call('tools:install', profile.shell); }
@@ -104,7 +111,8 @@ async function openSession(profile) {
   if (!graphical) {
     const mount = elem('div', '', 'terminal-mount'); item.pane.append(mount);
     const terminal = new Terminal({ fontFamily: 'Cascadia Code, Consolas, monospace', fontSize: state.config.settings.fontSize, scrollback: state.config.settings.scrollback, cursorBlink: true, theme: theme(), allowProposedApi: false });
-    item.terminal = terminal; item.fit = new FitAddon(); item.search = new SearchAddon(); terminal.loadAddon(item.fit); terminal.loadAddon(item.search); terminal.open(mount); extras.attach(item);
+    item.terminal = terminal; item.fit = new FitAddon(); item.search = new SearchAddon(); terminal.loadAddon(item.fit); terminal.loadAddon(item.search); terminal.open(mount);
+    terminal.loadAddon(new WebLinksAddon((_, uri) => safe(() => call('links:open', uri))())); extras.attach(item);
     terminal.onData(data => extras.input(item, data));
     terminal.onResize(safe(size => call('terminal:resize', item.id, size.cols, size.rows)));
     terminal.attachCustomKeyEventHandler(event => {
@@ -136,7 +144,7 @@ async function openSession(profile) {
       await call('graphics:activate', item.id);
     } else item.mount.append(elem('div', profile.type === 'rdp' ? 'Conectando à área de trabalho…' : 'Servidor X11 ativo. Abra uma sessão SSH com aplicativos X11 para exibir as janelas aqui.', 'graphic-message'));
   }
-  activeId = item.id; layout(); toast(`${profile.name} aberta.`); item.terminal?.focus();
+  activeId = item.id; layout(); toast(`${profile.name} aberta.`); item.terminal?.focus(); scheduleSaveOpen();
 }
 async function paste(item, text) {
   if (!text) return;
@@ -149,7 +157,7 @@ async function closeSession(id, force = false) {
   await call(item.graphical ? 'graphics:close' : 'terminal:close', id);
   item.rfb?.disconnect(); item.terminal?.dispose(); item.pane.remove(); sessions.delete(id);
   if (activeId === id) activeId = [...sessions.keys()].at(-1);
-  layout();
+  layout(); scheduleSaveOpen();
 }
 function renderTabs() {
   $('tabs').replaceChildren();
@@ -289,9 +297,19 @@ $('open-tools').onclick = safe(async () => { $('tools-dialog').showModal(); upda
 $('tools-close').onclick = () => { $('tools-dialog').close(); updateNativeBounds(); };
 $('tools-dialog').addEventListener('close', updateNativeBounds);
 $('settings').onclick = safe(async () => {
-  const values = await form({ title: 'Preferências', message: 'Dados locais: ' + state.dataPath, fields: [{ name: 'fontSize', label: 'Fonte do terminal', type: 'number', value: state.config.settings.fontSize, min: 10, max: 28 }, { name: 'theme', label: 'Tema', value: state.config.settings.theme, options: [{ value: 'dark', label: 'Escuro' }, { value: 'light', label: 'Claro' }, { value: 'dracula', label: 'Dracula' }, { value: 'nord', label: 'Nord' }, { value: 'solarized', label: 'Solarized escuro' }, { value: 'monokai', label: 'Monokai' }] }, { name: 'scrollback', label: 'Linhas no histórico', type: 'number', value: state.config.settings.scrollback }, { name: 'syncFolder', label: 'Pasta de sincronização (OneDrive, Dropbox, repositório Git…)', value: state.config.settings.syncFolder || '', wide: true }, { name: 'autocomplete', label: 'Sugerir comandos do histórico enquanto digito', type: 'checkbox', value: state.config.settings.autocomplete !== false, wide: true }, { name: 'clear', label: 'Apagar senhas SSH guardadas', type: 'checkbox', wide: true }] });
-  if (!values) return; state.config.settings = await call('settings:save', values); if (values.clear) await call('credentials:clear'); applySettings();
+  const lock = await call('lock:status');
+  const values = await form({ title: 'Preferências', message: 'Dados locais: ' + state.dataPath, fields: [{ name: 'fontSize', label: 'Fonte do terminal', type: 'number', value: state.config.settings.fontSize, min: 10, max: 28 }, { name: 'theme', label: 'Tema', value: state.config.settings.theme, options: [{ value: 'dark', label: 'Escuro' }, { value: 'light', label: 'Claro' }, { value: 'dracula', label: 'Dracula' }, { value: 'nord', label: 'Nord' }, { value: 'solarized', label: 'Solarized escuro' }, { value: 'monokai', label: 'Monokai' }] }, { name: 'scrollback', label: 'Linhas no histórico', type: 'number', value: state.config.settings.scrollback }, { name: 'syncFolder', label: 'Pasta de sincronização (OneDrive, Dropbox, repositório Git…)', value: state.config.settings.syncFolder || '', wide: true }, { name: 'autocomplete', label: 'Sugerir comandos do histórico enquanto digito', type: 'checkbox', value: state.config.settings.autocomplete !== false, wide: true }, { name: 'restoreSessions', label: 'Reabrir as sessões ao iniciar o aplicativo', type: 'checkbox', value: !!state.config.settings.restoreSessions, wide: true },
+    { name: 'lockPassword', label: lock.enabled ? 'Trocar a senha mestra (deixe vazio para manter; “remover” abaixo tira a proteção)' : 'Definir senha mestra (bloqueia a lista de sessões ao abrir o app)', type: 'password', wide: true },
+    { name: 'autoLockMinutes', label: 'Bloquear automaticamente após (minutos, 0 = nunca)', type: 'number', value: lock.autoLockMinutes || 15, min: 0, max: 180 },
+    ...(lock.enabled ? [{ name: 'removeLock', label: 'Remover a senha mestra (pede a senha atual)', type: 'checkbox', wide: true }] : []),
+    { name: 'clear', label: 'Apagar senhas SSH guardadas', type: 'checkbox', wide: true }] });
+  if (!values) return; state.config.settings = await call('settings:save', values); if (values.clear) await call('credentials:clear');
+  if (values.removeLock) { const answer = await form({ title: 'Remover senha mestra', fields: [{ name: 'password', label: 'Senha mestra atual', type: 'password', required: true, wide: true }] }); if (answer) { await call('lock:clear', answer.password); $('lock-now').hidden = true; } }
+  else if (values.lockPassword) { await call('lock:set', { password: values.lockPassword, autoLockMinutes: values.autoLockMinutes }); $('lock-now').hidden = false; toast('Senha mestra definida.'); }
+  else if (lock.enabled) await call('lock:autolock', values.autoLockMinutes);
+  applySettings();
 });
+$('lock-now').onclick = safe(() => unlockOverlay());
 function applySettings() { const t = state.config.settings.theme; document.body.classList.toggle('light', t === 'light'); for (const name of ['dark', 'dracula', 'nord', 'solarized', 'monokai']) document.body.classList.toggle('t-' + name, t === name); for (const item of sessions.values()) if (item.terminal) { item.terminal.options.fontSize = state.config.settings.fontSize; item.terminal.options.theme = theme(); item.terminal.options.scrollback = state.config.settings.scrollback; } layout(); }
 $('new-session').onclick = safe(() => sessionForm()); $('welcome-ssh').onclick = safe(() => sessionForm());
 for (const id of ['local-shell', 'add-tab', 'welcome-local']) $(id).onclick = safe(() => openSession(localProfile()));
@@ -315,6 +333,13 @@ $('find-input').oninput = () => current()?.search?.findNext($('find-input').valu
 $('find-input').onkeydown = event => { if (event.key === 'Enter') current()?.search?.findNext(event.target.value); };
 $('log').onclick = safe(async () => { const item = current(); if (!item?.terminal) throw new Error('Selecione um terminal.'); item.logging = await call('terminal:log', item.id); renderTabs(); });
 $('reconnect').onclick = safe(async () => { const item = current(); if (item) { const p = item.profile; await closeSession(item.id); if (!sessions.has(item.id)) await openSession(p); } });
+$('import-system').onclick = safe(async () => {
+  const found = await call('import:scan'); const rows = [...found.putty, ...found.sshConfig];
+  if (!rows.length) { toast('Nenhuma sessão encontrada no PuTTY ou em ~/.ssh/config.'); return; }
+  const answer = await form({ title: `Importar ${rows.length} sessão(ões)`, message: 'Revise antes de importar. Senhas nunca são lidas nem importadas.', fields: rows.map((r, i) => ({ name: String(i), label: `${r.name} — ${r.username ? r.username + '@' : ''}${r.host}:${r.port} (${r.group})`, type: 'checkbox', value: true, wide: true })), accept: 'Importar selecionadas' });
+  if (!answer) return; const chosen = rows.filter((_, i) => answer[String(i)]);
+  if (!chosen.length) return; state.config = await call('import:apply', chosen); renderProfiles(); toast(`${chosen.length} sessão(ões) importada(s).`);
+});
 $('import-sessions').onclick = safe(async () => { const result = await call('config:import'); if (result) { state.config = result; renderProfiles(); } });
 document.addEventListener('keydown', event => {
   if (!event.ctrlKey || !event.shiftKey || document.querySelector('dialog[open]')) return;
@@ -325,4 +350,30 @@ document.addEventListener('keydown', event => {
 extras = setup({ $, api, call, form, toast, safe, elem, button, sessions, state: () => state, current, tool, fileState, reloadFiles: directory => loadFiles(directory), refresh: () => { renderProfiles(); renderSnippets(); applySettings(); } });
 setupPackages({ $, api, call, form, toast, safe, elem, button, state: () => state, updateNativeBounds });
 async function init() { state = await call('init'); state.secrets = await call('profile:secrets'); $('version').textContent = state.version; fileState.path = state.home; $('files-upload').hidden = true; renderProfiles(); renderSnippets(); applySettings(); }
-safe(init)();
+async function restoreOpenSessions() {
+  if (!state.config.settings.restoreSessions) return;
+  const list = await call('session:loadOpen'); if (!list.length) return;
+  toast(`Reabrindo ${list.length} sessão(ões)…`);
+  for (const item of list) { try { await openSession(item.profile); } catch (error) { toast(`Não foi possível reabrir “${item.profile.name}”: ${error.message}`); } }
+}
+async function unlockOverlay() {
+  for (;;) {
+    const answer = await form({ title: 'Stanis Terminal bloqueado', message: 'Digite a senha mestra para continuar.', fields: [{ name: 'password', label: 'Senha mestra', type: 'password', required: true, wide: true }], accept: 'Desbloquear', noCancel: true });
+    if (answer && await call('lock:check', answer.password)) return;
+    toast('Senha incorreta.');
+  }
+}
+let idleTimer;
+function armAutoLock(minutes) {
+  clearTimeout(idleTimer); if (!minutes) return;
+  const reset = () => { clearTimeout(idleTimer); idleTimer = setTimeout(() => safe(() => unlockOverlay())(), minutes * 60000); };
+  for (const type of ['mousemove', 'mousedown', 'keydown']) document.addEventListener(type, reset, { passive: true });
+  reset();
+}
+async function boot() {
+  const lock = await call('lock:status');
+  if (lock.enabled) { await unlockOverlay(); armAutoLock(lock.autoLockMinutes); }
+  $('lock-now').hidden = !lock.enabled;
+  await init(); await restoreOpenSessions();
+}
+safe(boot)();

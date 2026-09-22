@@ -12,11 +12,11 @@
   <header class="topbar">
     <div class="brand"><span class="logo">&gt;_</span><strong>Stanis Terminal</strong></div>
     <nav><button id="new-session" class="primary">＋ Nova sessão</button><div class="quick"><select id="quick-type" aria-label="Protocolo"><option value="rdp">RDP</option><option value="ssh">SSH</option><option value="vnc">VNC</option><option value="telnet">Telnet</option></select><input id="quick-input" placeholder="usuario@servidor" aria-label="Conexão rápida" spellcheck="false"><button id="quick-go" title="Conectar">→</button></div><button id="local-shell">Terminal local</button><button id="toggle-files">Arquivos</button><button id="open-packages">Pacotes</button><button id="open-tools">Ferramentas</button></nav>
-    <div class="local-badge" title="Sem telemetria, sem conta e sem nuvem"><span></span> Somente local</div><button id="settings" class="icon" title="Preferências">⚙</button>
+    <div class="local-badge" title="Sem telemetria, sem conta e sem nuvem"><span></span> Somente local</div><button id="lock-now" class="icon" title="Bloquear" hidden>🔒</button><button id="settings" class="icon" title="Preferências">⚙</button>
   </header>
   <div class="app-layout">
     <aside class="sidebar">
-      <div class="section-title">Sessões <span class="section-actions"><button id="new-folder" title="Nova pasta">＋ Pasta</button><button id="import-sessions" title="Importar sessões">Importar</button></span></div>
+      <div class="section-title">Sessões <span class="section-actions"><button id="new-folder" title="Nova pasta">＋ Pasta</button><button id="import-sessions" title="Importar sessões (arquivo JSON)">Importar</button><button id="import-system" title="Importar do PuTTY ou ~/.ssh/config">De outro app</button></span></div>
       <input id="filter-sessions" class="search" placeholder="Filtrar sessões…" aria-label="Filtrar sessões">
       <div id="sessions-list"></div>
       <div class="sidebar-bottom"><span>Comandos rápidos</span><button id="add-snippet" title="Criar comando rápido">＋</button></div>

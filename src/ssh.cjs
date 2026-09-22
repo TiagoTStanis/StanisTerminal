@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { Client } = require('ssh2');
+const { SocksClient } = require('socks');
 const { readJSON, writeJSON } = require('./config.cjs');
 
 // A mesma conexão atende ao terminal e ao SFTP. Nenhuma senha entra em config.json.
@@ -27,6 +28,14 @@ class SSH {
     if (!password && !agent) credentials = await this.ask({ title: `Autenticação — ${profile.username}@${profile.host}`, fields: [{ name: 'password', label: profile.keyPath ? 'Frase secreta da chave (vazio se não houver)' : 'Senha SSH', type: 'password' }], remember: true });
     if (!credentials) throw new Error('Conexão cancelada.');
     let parent, sock;
+    if (profile.proxyHost) {
+      // Proxy SOCKS5 de saída para alcançar o servidor (diferente do túnel/proxy que o app oferece como ferramenta).
+      const { socket } = await SocksClient.createConnection({
+        proxy: { host: profile.proxyHost, port: profile.proxyPort, type: 5 },
+        command: 'connect', destination: { host: profile.host, port: profile.port }
+      });
+      sock = socket;
+    }
     if (profile.jumpId) {
       const gateway = this.config.value.profiles.find(p => p.id === profile.jumpId && p.type === 'ssh');
       if (!gateway) throw new Error('Gateway SSH não encontrado.');
@@ -55,8 +64,8 @@ class SSH {
         } catch (error) { client.end(); reject(error); }
       });
       try {
-        client.connect({ host: profile.host, port: profile.port, username: profile.username,
-          agent, agentForward: false,
+        client.connect({ host: profile.host, port: profile.port, username: profile.username, sock: sock ?? undefined,
+          agent, agentForward: !!(agent && profile.agentForward),
           password: profile.keyPath || agent ? undefined : credentials.password,
           privateKey: profile.keyPath ? fs.readFileSync(profile.keyPath) : undefined,
           passphrase: profile.keyPath ? credentials.password || undefined : undefined,

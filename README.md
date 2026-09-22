@@ -6,7 +6,7 @@ O projeto se inspira no uso de sessões do MobaXterm e do WindTerm. É um aplica
 
 ## Para usar
 
-Baixe **StanisTerminal-1.2.0-win-x64.exe** na página de [Releases](https://github.com/TiagoTStanis/StanisTerminal/releases) e abra. Ele extrai os componentes antes de iniciar e demora um pouco mais na primeira vez. Não precisa instalar Node.js, Python ou Electron. Use Windows 10/11 de 64 bits e uma pasta em que você possa salvar arquivos, como Documentos. Confira o SHA-256 e a assinatura GPG do release (veja [como verificar](docs/VERIFICAR-ASSINATURA.md); impressão digital `A345 44C3 43F2 E16B EF64  C7A4 95A1 3721 ED00 B9E6`).
+Baixe **StanisTerminal-1.3.0-win-x64.exe** na página de [Releases](https://github.com/TiagoTStanis/StanisTerminal/releases) e abra. Ele extrai os componentes antes de iniciar e demora um pouco mais na primeira vez. Não precisa instalar Node.js, Python ou Electron. Use Windows 10/11 de 64 bits e uma pasta em que você possa salvar arquivos, como Documentos. Confira o SHA-256 e a assinatura GPG do release (veja [como verificar](docs/VERIFICAR-ASSINATURA.md); impressão digital `A345 44C3 43F2 E16B EF64  C7A4 95A1 3721 ED00 B9E6`).
 
 1. Clique em **Abrir PowerShell** para trabalhar neste computador.
 2. Para acessar um servidor, clique em **Nova sessão**, escolha o protocolo e preencha nome, endereço e usuário. Salve e clique no perfil na barra lateral.
@@ -16,6 +16,9 @@ Baixe **StanisTerminal-1.2.0-win-x64.exe** na página de [Releases](https://gith
 O [manual de uso](docs/LEIA-ME.md) explica backups, X11, atalhos e mensagens comuns. Os [resultados de validação](docs/VALIDACAO.md) separam o que foi testado das conexões que dependem do seu ambiente.
 
 ## Recursos
+
+**Novo nesta versão:** links clicáveis no terminal (com confirmação antes de abrir no navegador), proxy SOCKS5 de saída e encaminhamento do agente para a conexão SSH, varredura de portas e Wake-on-LAN, importar sessões do PuTTY e do `~/.ssh/config`, reabrir sessões ao iniciar (opcional), e senha mestra com bloqueio automático por tempo ocioso.
+
 
 **Organização:** sessões em pastas e subpastas (arraste para mover, botão direito para renomear, exportar ou excluir), conexão rápida por `usuario@servidor` (RDP, SSH, VNC ou Telnet) e tema claro por padrão.
 

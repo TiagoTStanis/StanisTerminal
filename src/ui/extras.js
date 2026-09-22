@@ -230,6 +230,15 @@ export function setup(ctx) {
       if (result) return call('network:host', { ...result, kind, directory });
     });
   }
+  tool('Varredura de portas', 'TCP connect, sem privilégio de administrador', async () => {
+    const result = await form({ title: 'Varredura de portas', fields: [{ name: 'host', label: 'Host / IP', required: true, wide: true }, { name: 'ports', label: 'Portas (ex.: 1-1024 ou 22,80,443)', value: '1-1024', wide: true }] });
+    if (!result) return; toast('Varrendo…'); const open = await call('network:portscan', result);
+    return open.length ? `Portas abertas em ${result.host}: ${open.join(', ')}` : `Nenhuma porta aberta encontrada em ${result.host} no intervalo informado.`;
+  });
+  tool('Wake-on-LAN', 'Enviar pacote mágico para ligar um computador', async () => {
+    const result = await form({ title: 'Wake-on-LAN', fields: [{ name: 'mac', label: 'Endereço MAC (AA:BB:CC:DD:EE:FF)', required: true, wide: true }, { name: 'broadcast', label: 'Endereço de broadcast', value: '255.255.255.255' }, { name: 'port', label: 'Porta', type: 'number', value: 9 }] });
+    if (result) return call('network:wol', result);
+  });
   tool('Espelhar pasta (local → servidor)', 'Envia alterações continuamente por SFTP; nunca apaga', async () => {
     const options = sshSessions(); if (!options.length) throw new Error('Abra uma sessão SSH primeiro.');
     const result = await form({ title: 'Espelho por SFTP', message: 'Depois você escolhe a pasta local. Arquivos novos e alterados são enviados sozinhos. Nada é apagado no servidor e arquivos mais novos lá não são sobrescritos.', fields: [{ name: 'session', label: 'Sessão', options, wide: true }, { name: 'remote', label: 'Pasta remota (caminho absoluto)', value: '/tmp/espelho', required: true, wide: true }], accept: 'Escolher pasta local' });
@@ -252,7 +261,7 @@ export function setup(ctx) {
 
   // Agrupa as ferramentas por categoria, com um título antes de cada grupo.
   const GROUPS = [
-    ['Diagnóstico', ['Ping', 'Consulta DNS', 'Traceroute', 'Teste TCP', 'Portas seriais', 'SHA-256']],
+    ['Diagnóstico', ['Ping', 'Consulta DNS', 'Traceroute', 'Teste TCP', 'Portas seriais', 'SHA-256', 'Varredura de portas', 'Wake-on-LAN']],
     ['Túneis e espelho', ['Túnel SSH local', 'Proxy SOCKS5 (ssh -D)', 'Túnel SSH remoto (ssh -R)', 'Espelhar pasta (local → servidor)']],
     ['Servidores locais', ['Servidor HTTP local', 'Servidor TFTP', 'Servidor FTP', 'Servidor SFTP', 'Servidor VNC (compartilhar esta tela)']],
     ['Chaves e sessões', ['Gerar chave SSH', 'Exportar sessões', 'Importar sessões', 'Sincronizar (enviar)', 'Sincronizar (receber)']],

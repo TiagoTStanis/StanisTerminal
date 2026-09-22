@@ -1,4 +1,5 @@
 const net = require('node:net');
+const dgram = require('node:dgram');
 const dns = require('node:dns/promises');
 const http = require('node:http');
 const fs = require('node:fs');
@@ -13,6 +14,35 @@ const execute = promisify(execFile);
 function inside(root, file) { const relative = path.relative(root, file); return relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative)); }
 class Network {
   constructor(sessions, emit) { this.sessions = sessions; this.emit = emit; this.servers = new Map(); this.sockets = new Set(); }
+  // Varredura de portas: só TCP connect, sequencial em lotes, sem SYN cru (não precisa de administrador).
+  async portScan(options) {
+    const target = host(options.host); const ports = String(options.ports || '1-1024').split(',').flatMap(part => {
+      const range = part.trim().match(/^(\d+)(?:-(\d+))?$/); if (!range) throw new Error(`Intervalo de portas inválido: ${part}`);
+      const start = Number(range[1]), end = Number(range[2] || range[1]); if (start < 1 || end > 65535 || end < start) throw new Error('Portas devem estar entre 1 e 65535.');
+      if (end - start > 3000) throw new Error('Limite de 3000 portas por varredura.'); return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+    });
+    if (ports.length > 3000) throw new Error('Limite de 3000 portas por varredura.');
+    const open = []; const CONCURRENCY = 64;
+    for (let i = 0; i < ports.length; i += CONCURRENCY) {
+      await Promise.all(ports.slice(i, i + CONCURRENCY).map(port => new Promise(resolve => {
+        const socket = net.createConnection({ host: target, port }); socket.setTimeout(800);
+        const done = ok => { socket.destroy(); if (ok) open.push(port); resolve(); };
+        socket.once('connect', () => done(true)); socket.once('error', () => done(false)); socket.once('timeout', () => done(false));
+      })));
+    }
+    return open.sort((a, b) => a - b);
+  }
+  // Wake-on-LAN: pacote mágico UDP de broadcast; não confirma que o computador acordou.
+  async wakeOnLan(options) {
+    const mac = String(options.mac || '').replace(/[^0-9a-fA-F]/g, ''); if (mac.length !== 12) throw new Error('MAC inválido. Use o formato AA:BB:CC:DD:EE:FF.');
+    const macBytes = Buffer.from(mac, 'hex'); const packet = Buffer.concat([Buffer.alloc(6, 0xff), Buffer.concat(Array(16).fill(macBytes))]);
+    const socket = dgram.createSocket('udp4');
+    try {
+      await new Promise((resolve, reject) => socket.bind(0, () => { socket.setBroadcast(true); resolve(); }));
+      await new Promise((resolve, reject) => socket.send(packet, port(options.port, 9), options.broadcast || '255.255.255.255', error => error ? reject(error) : resolve()));
+      return `Pacote mágico enviado para ${mac.toUpperCase()}.`;
+    } finally { socket.close(); }
+  }
   async diagnostic(options) {
     const target = host(options.host);
     if (options.tool === 'dns') return JSON.stringify(await dns.lookup(target, { all: true }), null, 2);

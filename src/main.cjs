@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, safeStorage, clipboard, protocol, net: electronNet, session, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, safeStorage, clipboard, protocol, net: electronNet, session, Menu, shell } = require('electron');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
@@ -15,6 +15,7 @@ const { Transfers } = require('./transfers.cjs');
 const { Mirror } = require('./mirror.cjs');
 const { Tools } = require('./tools.cjs');
 const { Vault } = require('./vault.cjs');
+const { importPutty, importSshConfig } = require('./importers.cjs');
 const { Packages, ID: PACKAGE_ID } = require('./packages.cjs');
 const { MsysPackages, NAME: MSYS_NAME } = require('./msyspkg.cjs');
 const { execFile } = require('node:child_process');
@@ -23,7 +24,7 @@ const { SerialPort } = require('serialport');
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'stanis', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
 const testMode = process.argv.includes('--test-mode');
-if (testMode) app.setPath('userData', path.join(os.tmpdir(), 'stanis-terminal-test-' + process.pid));
+if (testMode) app.setPath('userData', process.env.STANIS_TEST_USERDATA || path.join(os.tmpdir(), 'stanis-terminal-test-' + process.pid));
 else if (process.env.PORTABLE_EXECUTABLE_DIR) app.setPath('userData', path.join(process.env.PORTABLE_EXECUTABLE_DIR, 'StanisTerminal-data'));
 else if (app.isPackaged) app.setPath('userData', path.join(path.dirname(app.getPath('exe')), 'StanisTerminal-data'));
 if (!testMode && !app.requestSingleInstanceLock()) app.quit();
@@ -109,7 +110,7 @@ function register() {
   const THEMES = ['dark', 'light', 'dracula', 'nord', 'solarized', 'monokai'];
   handle('settings:save', value => {
     const previous = config.value.settings || {};
-    config.value.settings = { fontSize: Math.max(10, Math.min(28, Number(value.fontSize) || 14)), theme: THEMES.includes(value.theme) ? value.theme : 'light', scrollback: Math.max(1000, Math.min(100000, Number(value.scrollback) || 10000)),
+    config.value.settings = { fontSize: Math.max(10, Math.min(28, Number(value.fontSize) || 14)), theme: THEMES.includes(value.theme) ? value.theme : 'light', restoreSessions: value.restoreSessions === undefined ? previous.restoreSessions === true : !!value.restoreSessions, scrollback: Math.max(1000, Math.min(100000, Number(value.scrollback) || 10000)),
       syncFolder: value.syncFolder === undefined ? previous.syncFolder || '' : text(value.syncFolder || '', 2048), autocomplete: value.autocomplete === undefined ? previous.autocomplete !== false : !!value.autocomplete };
     config.save(); return config.value.settings;
   });
@@ -125,6 +126,33 @@ function register() {
     if (!Array.isArray(values) || values.length > 100) throw new Error('Limite de 100 scripts.');
     config.value.scripts = values.map(v => ({ name: text(v.name), code: text(v.code, 100000) })); config.save(); return config.value.scripts;
   });
+  // Senha mestra / bloqueio de tela: PBKDF2 (scrypt) local, independente do DPAPI. Protege contra alguém
+  // com acesso à sua sessão Windows já aberta ver a lista de sessões; não protege contra quem tem sua senha do Windows.
+  handle('lock:status', () => ({ enabled: !!config.value.lock, autoLockMinutes: config.value.lock?.autoLockMinutes || 0 }));
+  handle('lock:set', ({ password, autoLockMinutes }) => {
+    if (typeof password !== 'string' || password.length < 4 || password.length > 200) throw new Error('A senha mestra precisa ter ao menos 4 caracteres.');
+    const salt = crypto.randomBytes(16); const hash = crypto.scryptSync(password, salt, 32);
+    config.value.lock = { salt: salt.toString('base64'), hash: hash.toString('base64'), autoLockMinutes: Math.max(0, Math.min(180, Number(autoLockMinutes) || 0)) };
+    config.save(); return true;
+  });
+  handle('lock:clear', password => {
+    if (!config.value.lock) return true;
+    const salt = Buffer.from(config.value.lock.salt, 'base64'); const hash = crypto.scryptSync(String(password || ''), salt, 32);
+    if (!crypto.timingSafeEqual(hash, Buffer.from(config.value.lock.hash, 'base64'))) throw new Error('Senha mestra incorreta.');
+    delete config.value.lock; config.save(); return true;
+  });
+  handle('lock:autolock', minutes => { if (config.value.lock) { config.value.lock.autoLockMinutes = Math.max(0, Math.min(180, Number(minutes) || 0)); config.save(); } return config.value.lock?.autoLockMinutes || 0; });
+  handle('lock:check', password => {
+    if (!config.value.lock) return true;
+    const salt = Buffer.from(config.value.lock.salt, 'base64'); const hash = crypto.scryptSync(String(password || ''), salt, 32);
+    return crypto.timingSafeEqual(hash, Buffer.from(config.value.lock.hash, 'base64'));
+  });
+  handle('session:saveOpen', list => {
+    if (!Array.isArray(list) || list.length > 24) throw new Error('Lista de sessões abertas inválida.');
+    const clean = list.map(item => ({ profile: item.profile.type === 'local' ? { type: 'local', shell: profile({ type: 'local', shell: item.profile.shell, name: 'x', group: 'g' }).shell, name: text(item.profile.name), group: 'Local', cwd: text(item.profile.cwd || '', 2048) } : profile(item.profile) }));
+    writeJSON(path.join(config.directory, 'open-sessions.json'), clean); return true;
+  });
+  handle('session:loadOpen', () => readJSON(path.join(config.directory, 'open-sessions.json'), []));
   handle('history:load', () => readJSON(path.join(config.directory, 'history.json'), []));
   handle('history:save', values => {
     if (!Array.isArray(values)) throw new Error('Histórico inválido.');
@@ -251,6 +279,28 @@ function register() {
   handle('transfer:cancel', id => transfers.cancel(id));
   handle('transfer:clear', () => transfers.clear());
   handle('transfer:list', () => transfers.list());
+  handle('import:scan', async () => {
+    const [putty, sshConfig] = await Promise.all([importPutty(), importSshConfig()]);
+    return { putty, sshConfig };
+  });
+  handle('import:apply', rows => {
+    if (!Array.isArray(rows) || rows.length > 500) throw new Error('Muitas sessões para importar de uma vez.');
+    const byName = new Map(); const saved = [];
+    for (const row of rows) {
+      const p = profile({ type: 'ssh', name: text(row.name), group: text(row.group || 'Importado'), host: row.host, port: row.port, username: row.username || '', keyPath: row.keyPath || '' });
+      byName.set(row.name, p.id); saved.push({ ...p, jumpName: row.jumpName || '' });
+    }
+    for (const p of saved) { if (p.jumpName && byName.has(p.jumpName)) p.jumpId = byName.get(p.jumpName); delete p.jumpName; config.putProfile(p); }
+    return config.value;
+  });
+  handle('links:open', async url => {
+    let parsed; try { parsed = new URL(text(url, 2048)); } catch { throw new Error('Endereço inválido.'); }
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Só é permitido abrir links http:// ou https://.');
+    const answer = await ask({ title: 'Abrir link no navegador?', message: parsed.toString(), fields: [], accept: 'Abrir' });
+    if (answer) await shell.openExternal(parsed.toString());
+  });
+  handle('network:portscan', options => network.portScan(options));
+  handle('network:wol', options => network.wakeOnLan(options));
   handle('network:diagnostic', options => network.diagnostic(options));
   handle('network:tunnel', options => network.tunnel(options));
   handle('network:serve', options => network.serve(options));
