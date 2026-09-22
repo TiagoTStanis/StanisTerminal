@@ -25,12 +25,22 @@ const CATALOG = {
     msi: true, file: path.join('PFiles', 'TightVNC', 'tvnserver.exe'), signer: 'OOO GlavSoft',
     verify: [path.join('PFiles', 'TightVNC', 'tvnserver.exe'), path.join('PFiles', 'TightVNC', 'screenhooks64.dll'), path.join('PFiles', 'TightVNC', 'hookldr.exe')],
     source: 'https://www.tightvnc.com/ — hash calculado sobre o instalador com assinatura Authenticode válida de OOO GlavSoft; a assinatura dos executáveis é conferida de novo após extrair'
+  },
+  msys2: {
+    name: 'MSYS2 (ambiente Unix com pacman: bash, coreutils, gcc, git, etc.)', version: '20260611', license: 'BSD/GPL/vários',
+    url: 'https://repo.msys2.org/distrib/x86_64/msys2-base-x86_64-20260611.sfx.exe',
+    sha256: 'c105946e64e08f099ac0e4647461ce762b95333ad211777666476a9a41451d65', maxBytes: 80 * 1024 * 1024,
+    sfx: true, file: path.join('msys64', 'usr', 'bin', 'bash.exe'),
+    source: 'https://www.msys2.org/ — assinatura GPG de Christoph Reiter conferida; impressão digital primária 0EBF 782C 5D53 F7E5 FB02 A667 46BD 761F 7A49 B0EC (a mesma publicada na documentação do MSYS2). Download de ~53 MB, ~400 MB em disco.'
   }
 };
 
 // Extrai o MSI sem instalar nada (instalação administrativa: só descompacta arquivos) e confere a assinatura digital.
 async function extractMsi(msi, target) {
   await run(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'msiexec.exe'), ['/a', msi, '/qn', `TARGETDIR=${target}`], { windowsHide: true, timeout: 120000 });
+}
+async function extractSelfExtracting(exe, target) {
+  await run(exe, ['-y', '-o' + target], { windowsHide: true, timeout: 600000, maxBuffer: 20 * 1024 * 1024 });
 }
 async function signatureOf(file) {
   const script = "$s = Get-AuthenticodeSignature -LiteralPath $env:STANIS_FILE; if ($s.Status -ne 'Valid') { 'INVALID:' + $s.Status } else { $s.SignerCertificate.Subject }";
@@ -39,7 +49,7 @@ async function signatureOf(file) {
 }
 
 class Tools {
-  constructor(directory, ask, { catalog = CATALOG, allowInsecure = false, extract = extractMsi, signature = signatureOf } = {}) { this.root = path.join(directory, 'tools'); this.ask = ask; this.catalog = catalog; this.allowInsecure = allowInsecure; this.extract = extract; this.signature = signature; }
+  constructor(directory, ask, { catalog = CATALOG, allowInsecure = false, extract = extractMsi, signature = signatureOf, extractSfx = extractSelfExtracting, afterInstall = null } = {}) { this.root = path.join(directory, 'tools'); this.ask = ask; this.catalog = catalog; this.allowInsecure = allowInsecure; this.extract = extract; this.signature = signature; this.extractSfx = extractSfx; this.afterInstall = afterInstall; }
   entry(id) { const item = Object.hasOwn(this.catalog, id) ? this.catalog[id] : null; if (!item) throw new Error('Ferramenta desconhecida.'); return item; }
   file(id) { return path.join(this.root, id, this.entry(id).file); }
   installed(id) { return fs.existsSync(this.file(id)); }
@@ -78,8 +88,24 @@ class Tools {
     if (sha256 !== item.sha256) throw new Error(`Hash SHA-256 diferente do esperado (recebido ${sha256}). Arquivo descartado.`);
     const folder = path.join(this.root, id); await fsp.mkdir(folder, { recursive: true });
     if (item.msi) return this.installMsi(id, item, folder, bytes);
+    if (item.sfx) return this.installSfx(id, item, folder, bytes);
     const temp = path.join(folder, item.file + '.' + crypto.randomUUID() + '.part'); await fsp.writeFile(temp, bytes, { mode: 0o755 }); await fsp.rename(temp, this.file(id));
     return this.file(id);
+  }
+  // Pacote autoextraível (7-Zip SFX, como o do MSYS2): extrai para uma pasta de preparo e só depois move para o lugar final.
+  async installSfx(id, item, folder, bytes) {
+    const stage = path.join(this.root, id + '.stage-' + crypto.randomUUID()); await fsp.mkdir(stage, { recursive: true });
+    try {
+      const exe = path.join(stage, 'pacote.exe'); await fsp.writeFile(exe, bytes, { mode: 0o755 });
+      const out = path.join(stage, 'x'); await this.extractSfx(exe, out);
+      const top = item.file.split(path.sep)[0];
+      if (!fs.existsSync(path.join(out, item.file))) throw new Error('O pacote extraído não tem o conteúdo esperado. Instalação descartada.');
+      await fsp.rm(folder, { recursive: true, force: true }); await fsp.mkdir(folder, { recursive: true });
+      await fsp.rename(path.join(out, top), path.join(folder, top));
+      if (this.afterInstall) await this.afterInstall(id, this.file(id));
+      return this.file(id);
+    } catch (error) { await fsp.rm(folder, { recursive: true, force: true }); throw error; }
+    finally { await fsp.rm(stage, { recursive: true, force: true }); }
   }
   async installMsi(id, item, folder, bytes) {
     const stage = path.join(this.root, id + '.stage-' + crypto.randomUUID()); await fsp.mkdir(stage, { recursive: true });

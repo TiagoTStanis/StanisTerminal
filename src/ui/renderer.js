@@ -63,13 +63,13 @@ $('form-dialog').addEventListener('cancel', event => { event.preventDefault(); f
 api.on('question', safe(async spec => { const value = await form(spec); await call('answer', spec.id, value); }));
 api.on('notice', toast);
 
-function localProfile(shell = 'powershell') { return { type: 'local', shell, name: { powershell: 'PowerShell', cmd: 'CMD', bash: 'Git Bash', wsl: 'WSL', busybox: 'BusyBox (Unix)' }[shell], group: 'Local', cwd: state.home }; }
+function localProfile(shell = 'powershell') { return { type: 'local', shell, name: { powershell: 'PowerShell', cmd: 'CMD', bash: 'Git Bash', wsl: 'WSL', busybox: 'BusyBox (Unix)', msys2: 'Unix (MSYS2)' }[shell], group: 'Local', cwd: state.home }; }
 async function sessionForm(existing = {}) {
   const type = existing.type || 'ssh';
   const result = await form({ title: existing.id ? 'Editar sessão' : 'Nova sessão', accept: 'Salvar sessão', fields: [
     { name: 'name', label: 'Nome', value: existing.name || '', required: true }, { name: 'group', label: 'Pasta', value: existing.group || 'Minhas sessões', options: [...new Set(['Minhas sessões', ...(state.config.folders || []), ...state.config.profiles.map(p => p.group)])].sort((a, b) => a.localeCompare(b)).map(f => ({ value: f, label: f })) },
     { name: 'type', label: 'Protocolo', value: type, options: [{ value: 'ssh', label: 'SSH + SFTP' }, { value: 'local', label: 'Terminal local' }, { value: 'rdp', label: 'RDP integrado' }, { value: 'vnc', label: 'VNC integrado' }, { value: 'telnet', label: 'Telnet' }, { value: 'serial', label: 'Serial (8N1)' }, { value: 'x11', label: 'Servidor X11 local' }, { value: 'ssh-x11', label: 'SSH com aplicativos X11' }, { value: 'xdmcp', label: 'Área de trabalho XDMCP' }, { value: 'rlogin', label: 'Rlogin (sem criptografia)' }, { value: 'rsh', label: 'Rsh — executar comando (sem criptografia)' }] },
-    { name: 'shell', label: 'Shell local', value: existing.shell || 'powershell', options: ['powershell', 'cmd', 'bash', 'wsl', 'busybox'] },
+    { name: 'shell', label: 'Shell local', value: existing.shell || 'powershell', options: ['powershell', 'cmd', 'bash', 'wsl', 'busybox', 'msys2'] },
     { name: 'cwd', label: 'Pasta inicial', value: existing.cwd || state.home, wide: true },
     { name: 'host', label: 'Host / IP', value: existing.host || '' }, { name: 'port', label: 'Porta (vazio = padrão)', type: 'number', value: existing.port || '', min: 1, max: 65535 },
     { name: 'username', label: 'Usuário / domínio\\usuário', value: existing.username || '' },
@@ -93,7 +93,7 @@ let tree = null;
 function renderProfiles() { tree ??= setupTree({ $, call, form, toast, safe, elem, state: () => state, openSession, sessionForm, localProfile }); tree.render(); }
 async function openSession(profile) {
   if (sessions.size >= 24) throw new Error('Limite de 24 sessões nesta versão.');
-  if (profile.type === 'local' && profile.shell === 'busybox') await call('tools:install', 'busybox');
+  if (profile.type === 'local' && ['busybox', 'msys2'].includes(profile.shell)) { if (profile.shell === 'msys2') toast('Preparando o ambiente Unix (MSYS2). Na primeira vez pode levar alguns minutos…'); await call('tools:install', profile.shell); }
   toast(`Abrindo ${profile.name}…`);
   const graphical = ['rdp', 'vnc', 'x11', 'xdmcp'].includes(profile.type);
   const result = await call(graphical ? 'graphics:open' : 'terminal:open', profile);

@@ -1,4 +1,4 @@
-# Validação da versão 1.1.0
+# Validação da versão 1.2.0
 
 Ambiente: Windows x64 desta máquina. Os testes de conexão usam servidores temporários em `127.0.0.1`; nenhum servidor da empresa é acessado.
 
@@ -23,9 +23,15 @@ Os scripts estão em `tests/`. O fechamento dos aplicativos de teste encerra as 
 
 Rode `pnpm test`, `pnpm test:ui`, `pnpm test:extras`, `pnpm test:organize`, `pnpm test:connections` e `pnpm test:vault`. O teste real do VNC baixa o instalador e só roda com `STANIS_TEST_NETWORK=1`.
 
+## Novidades da 1.2.0: o que foi testado
+
+- Ambiente Unix completo (MSYS2 + pacman) instalado sob demanda com hash e assinatura GPG conferidos; teste real de ponta a ponta pela interface: instalar o ambiente, buscar e instalar um pacote (`tree`) pela tela de Pacotes, e usá-lo no shell Unix.
+- Abas separadas na tela de Pacotes para Windows (winget) e Unix (MSYS2), cada uma com busca, instalados, atualizações e listas.
+- Release assinado com GPG (chave dedicada); veja `docs/VERIFICAR-ASSINATURA.md`.
+
 ## Não verificado nesta máquina
 
-- Instalar, atualizar e remover programas de verdade pelo winget: instaladores podem pedir a confirmação do Windows (UAC), que o aplicativo não controla.
+- Instalar, atualizar e remover programas de verdade pelo winget: instaladores podem pedir a confirmação do Windows (UAC), que o aplicativo não controla. (O pacman do MSYS2 foi testado de ponta a ponta e não pede UAC.)
 - Conexão RDP real com senha guardada (não há servidor RDP aqui; o controle inicializa e o cofre foi testado).
 - Agente SSH real do Windows (o serviço `ssh-agent` está desativado nesta máquina) e painel SFTP que segue o terminal com uma sessão SSH real.
 - Abrir o shell BusyBox pela interface, e iniciar o servidor VNC pelo botão da interface (o caminho de código foi testado).

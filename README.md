@@ -6,7 +6,7 @@ O projeto se inspira no uso de sessões do MobaXterm e do WindTerm. É um aplica
 
 ## Para usar
 
-Baixe **StanisTerminal-1.1.0-win-x64.exe** na página de [Releases](https://github.com/TiagoTStanis/StanisTerminal/releases) e abra. Ele extrai os componentes antes de iniciar e demora um pouco mais na primeira vez. Não precisa instalar Node.js, Python ou Electron. Use Windows 10/11 de 64 bits e uma pasta em que você possa salvar arquivos, como Documentos. Confira o SHA-256 e a assinatura GPG do release (veja [como verificar](docs/VERIFICAR-ASSINATURA.md); impressão digital `A345 44C3 43F2 E16B EF64  C7A4 95A1 3721 ED00 B9E6`).
+Baixe **StanisTerminal-1.2.0-win-x64.exe** na página de [Releases](https://github.com/TiagoTStanis/StanisTerminal/releases) e abra. Ele extrai os componentes antes de iniciar e demora um pouco mais na primeira vez. Não precisa instalar Node.js, Python ou Electron. Use Windows 10/11 de 64 bits e uma pasta em que você possa salvar arquivos, como Documentos. Confira o SHA-256 e a assinatura GPG do release (veja [como verificar](docs/VERIFICAR-ASSINATURA.md); impressão digital `A345 44C3 43F2 E16B EF64  C7A4 95A1 3721 ED00 B9E6`).
 
 1. Clique em **Abrir PowerShell** para trabalhar neste computador.
 2. Para acessar um servidor, clique em **Nova sessão**, escolha o protocolo e preencha nome, endereço e usuário. Salve e clique no perfil na barra lateral.
@@ -39,6 +39,7 @@ O [manual de uso](docs/LEIA-ME.md) explica backups, X11, atalhos e mensagens com
 - Login SSH pelo agente do Windows (OpenSSH ou Pageant): a chave privada nunca passa pelo aplicativo.
 - Painel SFTP que acompanha a pasta do terminal (OSC 7) e espelho contínuo local → servidor (nunca apaga nem sobrescreve arquivo mais novo).
 - Ferramentas verificadas: o BusyBox (grep, awk, sed, tar, vi…) é baixado só depois da sua confirmação, de uma origem oficial fixa, por HTTPS, com SHA-256 conferido; arquivo diferente do esperado é descartado. Nenhum dado seu vai na requisição. Ele aparece como um shell local “BusyBox (Unix)”.
+- Ambiente Unix completo com gerenciador de pacotes (MSYS2 + pacman): bash, coreutils, gcc, git e milhares de pacotes, tudo dentro da pasta do app. A tela de Pacotes tem uma aba “Unix (MSYS2)” ao lado da do Windows.
 - Servidor VNC (TightVNC, baixado com hash e assinatura digital conferidos): escuta só em 127.0.0.1, com senha opcional de até 8 caracteres. Para outro computador ver sua tela, use um túnel SSH remoto para a porta escolhida. Sem senha, qualquer programa da sua conta Windows consegue se conectar.
 
 Git Bash e WSL são opcionais e precisam estar instalados no Windows. A conexão serial precisa do equipamento e do driver. RDP usa o controle nativo do Windows e exige uma identidade de servidor válida.
@@ -73,6 +74,6 @@ O servidor X11 fica em `vendor/vcxsrv` e deve acompanhar o código para que o bu
 
 ## Limites
 
-Pacotes cobrem o Windows (winget); não há gerenciador de pacotes Unix (apt/pacman) dentro do app, só a lista fixa de “Ferramentas verificadas”. Não há API de plugins além dos scripts Lua. A sincronização de configurações é manual, por botão. O editor é para texto UTF-8 de até 2 MiB.
+Não há API de plugins além dos scripts Lua. A sincronização de configurações é manual, por botão. O editor é para texto UTF-8 de até 2 MiB.
 
 O executável não tem assinatura digital de editor. A primeira abertura pode ser sinalizada pelo Windows. A entrega inclui um SHA-256 para conferir se o arquivo foi alterado.

@@ -16,6 +16,8 @@ const { Mirror } = require('./mirror.cjs');
 const { Tools } = require('./tools.cjs');
 const { Vault } = require('./vault.cjs');
 const { Packages, ID: PACKAGE_ID } = require('./packages.cjs');
+const { MsysPackages, NAME: MSYS_NAME } = require('./msyspkg.cjs');
+const { execFile } = require('node:child_process');
 const { startVnc, cleanupStale } = require('./vncserver.cjs');
 const { SerialPort } = require('serialport');
 
@@ -26,7 +28,7 @@ else if (process.env.PORTABLE_EXECUTABLE_DIR) app.setPath('userData', path.join(
 else if (app.isPackaged) app.setPath('userData', path.join(path.dirname(app.getPath('exe')), 'StanisTerminal-data'));
 if (!testMode && !app.requestSingleInstanceLock()) app.quit();
 app.on('second-instance', () => { if (window) { if (window.isMinimized()) window.restore(); window.focus(); } });
-let window, config, terminals, files, network, graphics, transfers, tools, vault, packages;
+let window, config, terminals, files, network, graphics, transfers, tools, vault, packages, msys;
 const questions = new Map();
 const emit = (channel, value) => { if (window && !window.isDestroyed()) window.webContents.send(channel, value); };
 function ask(question) {
@@ -218,16 +220,17 @@ function register() {
     network.servers.set(id, { id, name, kind: 'vnc', server: { close: () => server.close(), closeAllConnections() {} } });
     return { id, name, port: server.port };
   });
-  handle('packages:search', (query, source) => packages.search(query, source));
-  handle('packages:installed', () => packages.installed());
-  handle('packages:upgrades', () => packages.upgrades());
-  handle('packages:operate', (action, id, source) => packages.operate(action, id, source));
-  handle('packages:cancel', () => packages.cancel());
+  const backend = source => source === 'msys2' ? msys : packages;
+  handle('packages:search', (query, source) => backend(source).search(query, source));
+  handle('packages:installed', source => backend(source).installed());
+  handle('packages:upgrades', source => backend(source).upgrades());
+  handle('packages:operate', (action, id, source) => backend(source).operate(action, id, source));
+  handle('packages:cancel', () => { packages.cancel(); msys.cancel(); });
   const cleanLists = values => {
     if (!Array.isArray(values) || values.length > 100) throw new Error('Limite de 100 listas.');
     return values.map(list => {
       if (!Array.isArray(list.items) || list.items.length > 500) throw new Error('Lista inválida.');
-      return { name: text(list.name), items: list.items.map(item => { if (!PACKAGE_ID.test(item.id || '')) throw new Error(`Identificador inválido: ${String(item.id).slice(0, 40)}`); return { id: item.id, name: text(item.name || item.id, 200), source: item.source === 'msstore' ? 'msstore' : 'winget' }; }) };
+      return { name: text(list.name), items: list.items.map(item => { const source = ['msstore', 'msys2'].includes(item.source) ? item.source : 'winget'; if (!(source === 'msys2' ? MSYS_NAME : PACKAGE_ID).test(item.id || '')) throw new Error(`Identificador inválido: ${String(item.id).slice(0, 40)}`); return { id: item.id, name: text(item.name || item.id, 200), source }; }) };
     });
   };
   handle('packages:lists:save', values => { config.value.packageLists = cleanLists(values); config.save(); return config.value.packageLists; });
@@ -294,7 +297,11 @@ app.whenReady().then(async () => {
     Menu.setApplicationMenu(null);
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     window.webContents.on('will-navigate', event => event.preventDefault());
-    const ssh = new SSH(config, ask, safeStorage); terminals = new Sessions(ssh, emit); files = new Files(terminals, ask); transfers = new Transfers(files, emit); tools = new Tools(config.directory, ask); packages = new Packages(emit); terminals.toolPath = id => tools.file(id); network = new Network(terminals, emit); vault = new Vault(config.directory, safeStorage); graphics = new Graphics(window, emit, ask, app.isPackaged, vault, id => config.value.profiles.some(p => p.id === id));
+    const ssh = new SSH(config, ask, safeStorage); terminals = new Sessions(ssh, emit); files = new Files(terminals, ask); transfers = new Transfers(files, emit); tools = new Tools(config.directory, ask, { afterInstall: async (id, file) => {
+      // Primeiro uso do MSYS2: inicializa o chaveiro do pacman (o próprio MSYS2 consulta o servidor de chaves nessa etapa).
+      if (id === 'msys2') await new Promise((resolve, reject) => execFile(file, ['-lc', 'exit'], { env: { ...process.env, MSYSTEM: 'MSYS', CHERE_INVOKING: '1' }, windowsHide: true, timeout: 600000 }, error => error ? reject(new Error('Não foi possível inicializar o MSYS2: ' + error.message)) : resolve()));
+    } });
+    packages = new Packages(emit); msys = new MsysPackages(emit, () => tools.installed('msys2') ? path.join(tools.root, 'msys2', 'msys64') : null); terminals.toolPath = id => tools.file(id); network = new Network(terminals, emit); vault = new Vault(config.directory, safeStorage); graphics = new Graphics(window, emit, ask, app.isPackaged, vault, id => config.value.profiles.some(p => p.id === id));
     terminals.getX11 = () => graphics.getX11();
     if (tools.installed('tightvnc')) cleanupStale(tools.file('tightvnc')).catch(() => {});
     register();
@@ -305,7 +312,7 @@ app.whenReady().then(async () => {
         dialog.showMessageBox(window, { type: 'question', message: 'Encerrar o aplicativo e todas as sessões?', buttons: ['Continuar trabalhando', 'Encerrar'], defaultId: 0, cancelId: 0 }).then(result => { if (result.response === 1) { closing = true; window.close(); } });
       }
     });
-    window.on('closed', () => { terminals.closeAll(); graphics.closeAll(); packages?.closeAll(); files.closeAll(); network.closeAll(); for (const q of questions.values()) { clearTimeout(q.timer); q.resolve(null); } questions.clear(); app.quit(); });
+    window.on('closed', () => { terminals.closeAll(); graphics.closeAll(); packages?.closeAll(); msys?.closeAll(); files.closeAll(); network.closeAll(); for (const q of questions.values()) { clearTimeout(q.timer); q.resolve(null); } questions.clear(); app.quit(); });
     await window.loadURL('stanis://app/index.html'); window.show();
   } catch (error) { console.error(error); dialog.showErrorBox('Stanis Terminal', error.message); app.quit(); }
 });

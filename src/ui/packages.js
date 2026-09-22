@@ -2,12 +2,13 @@
 // Instalar e atualizar acontecem com um clique; só remover pede uma segunda confirmação, no próprio botão.
 export function setupPackages(ctx) {
   const { $, api, call, form, toast, safe, elem, button, state } = ctx;
-  const ui = { tab: 'search', rows: [], selected: new Map(), busy: false, query: '', message: '' };
+  const ui = { tab: 'search', source: 'winget', needsUnix: false, rows: [], selected: new Map(), busy: false, query: '', message: '' };
   const dialog = document.createElement('dialog'); dialog.id = 'packages-dialog'; dialog.className = 'wide';
   const head = elem('div', '', 'dialog-heading'); head.append(elem('h2', 'Pacotes'), button('✕', () => dialog.close(), 'icon-btn'));
   const tabs = elem('div', '', 'tabs-row'); const toolbar = elem('div', '', 'pk-toolbar'); const list = elem('div', '', 'pk-list'); const footer = elem('div', '', 'pk-footer');
   const log = elem('pre', '', 'pk-log'); log.hidden = true;
-  dialog.append(head, tabs, toolbar, list, log, footer); document.body.append(dialog);
+  const seg = elem('div', '', 'seg-row'); seg.setAttribute('role', 'group'); seg.setAttribute('aria-label', 'Origem dos pacotes');
+  dialog.append(head, seg, tabs, toolbar, list, log, footer); document.body.append(dialog);
 
   const TABS = [['search', 'Buscar'], ['installed', 'Instalados'], ['updates', 'Atualizações'], ['lists', 'Listas']];
   const lists = () => state().config.packageLists || (state().config.packageLists = []);
@@ -16,12 +17,13 @@ export function setupPackages(ctx) {
   api.on('packages:log', ({ id, line }) => writeLog(`${id}: ${line}`));
 
   async function load(tab = ui.tab) {
-    ui.tab = tab; ui.rows = []; ui.message = ''; render();
+    ui.tab = tab; ui.rows = []; ui.message = ''; ui.needsUnix = false; render();
+    if (ui.source === 'msys2' && tab !== 'lists') { const tools = await call('tools:list'); if (!tools.find(t => t.id === 'msys2')?.installed) { ui.needsUnix = true; ui.message = 'O ambiente Unix (MSYS2) ainda não está instalado. Ele traz bash, coreutils, gcc, git e o gerenciador pacman.'; return render(); } }
     if (tab === 'lists') return;
     if (tab === 'search' && !ui.query) { ui.message = 'Digite o nome de um programa e pressione Enter.'; return render(); }
     setBusy(true);
     try {
-      ui.rows = tab === 'search' ? await call('packages:search', ui.query, 'winget') : tab === 'installed' ? await call('packages:installed') : await call('packages:upgrades');
+      ui.rows = tab === 'search' ? await call('packages:search', ui.query, ui.source) : tab === 'installed' ? await call('packages:installed', ui.source) : await call('packages:upgrades', ui.source);
       if (tab === 'installed') ui.rows.sort((a, b) => Number(!!b.available) - Number(!!a.available) || a.name.localeCompare(b.name));
       ui.message = ui.rows.length ? '' : tab === 'updates' ? 'Tudo em dia.' : 'Nenhum resultado.';
     } catch (error) { ui.message = error.message; }
@@ -33,7 +35,7 @@ export function setupPackages(ctx) {
     log.textContent = ''; log.hidden = false; setBusy(true); const done = [], failed = [];
     for (const item of items) {
       writeLog(`— ${{ install: 'Instalando', upgrade: 'Atualizando', uninstall: 'Removendo' }[action]} ${item.name || item.id}…`);
-      try { const result = await call('packages:operate', action, item.id, item.source || 'winget'); (result.ok ? done : failed).push(item); writeLog(`${result.ok ? '✔' : '✘'} ${item.id}: ${result.message}`); if (result.message === 'Cancelado.') break; }
+      try { const result = await call('packages:operate', action, item.id, item.source || ui.source); (result.ok ? done : failed).push(item); writeLog(`${result.ok ? '✔' : '✘'} ${item.id}: ${result.message}`); if (result.message === 'Cancelado.') break; }
       catch (error) { failed.push(item); writeLog(`✘ ${item.id}: ${error.message}`); }
     }
     toast(failed.length ? `${done.length} concluído(s), ${failed.length} com erro. Veja o registro.` : `${done.length} concluído(s).`);
@@ -49,13 +51,14 @@ export function setupPackages(ctx) {
   function renderRows() {
     list.replaceChildren();
     if (ui.message) list.append(elem('p', ui.message, 'pk-empty'));
+    if (ui.needsUnix) list.append(button('Instalar ambiente Unix (download de ~53 MB)', safe(async () => { setBusy(true); toast('Instalando o ambiente Unix. Na primeira vez pode levar alguns minutos…'); try { await call('tools:install', 'msys2'); toast('Ambiente Unix instalado.'); } finally { ui.busy = false; } await load(); }), 'primary pk-install-unix'));
     for (const row of ui.rows) {
       const line = elem('div', '', 'pk-row'); const box = document.createElement('input'); box.type = 'checkbox'; box.disabled = !row.actionable || ui.busy; box.checked = ui.selected.has(key(row)); box.setAttribute('aria-label', `Selecionar ${row.name}`); box.onchange = () => pick(row, box.checked);
-      const info = elem('div', '', 'pk-info'); info.append(elem('strong', row.name), elem('small', row.id));
+      const info = elem('div', '', 'pk-info'); info.append(elem('strong', row.name), elem('small', row.description || row.id)); info.title = row.id;
       const version = elem('span', row.available ? `${row.version} → ${row.available}` : row.version, 'pk-version' + (row.available ? ' has-update' : ''));
       const actions = elem('div', '', 'pk-actions');
       if (row.actionable) {
-        if (ui.tab === 'search') actions.append(button('Instalar', () => operate('install', [row]), 'primary small'));
+        if (ui.tab === 'search') actions.append(row.installed ? two('Remover', () => operate('uninstall', [row]), 'small') : button('Instalar', () => operate('install', [row]), 'primary small'));
         if (row.available || ui.tab === 'updates') actions.append(button('Atualizar', () => operate('upgrade', [row]), 'primary small'));
         if (ui.tab === 'installed') actions.append(two('Remover', () => operate('uninstall', [row]), 'small'));
         for (const el of actions.children) el.disabled = ui.busy;
@@ -97,10 +100,11 @@ export function setupPackages(ctx) {
     }
   }
   function render() {
+    seg.replaceChildren(); for (const [id, label] of [['winget', 'Windows (winget)'], ['msys2', 'Unix (MSYS2)']]) { const b = button(label, () => { if (ui.source === id) return; ui.source = id; ui.rows = []; ui.selected.clear(); return load(ui.tab === 'lists' ? 'search' : ui.tab); }, 'seg-btn' + (ui.source === id ? ' active' : '')); b.setAttribute('aria-pressed', String(ui.source === id)); b.disabled = ui.busy; seg.append(b); }
     tabs.replaceChildren(); for (const [id, label] of TABS) { const t = button(label, () => load(id), 'tab-btn' + (ui.tab === id ? ' active' : '')); t.setAttribute('role', 'tab'); t.disabled = ui.busy && ui.tab !== id; tabs.append(t); }
     toolbar.replaceChildren(); toolbar.hidden = ui.tab !== 'search' && ui.tab !== 'installed' && ui.tab !== 'updates';
     if (ui.tab === 'search') { const input = document.createElement('input'); input.type = 'search'; input.placeholder = 'Buscar programas (ex.: 7zip, vscode, chrome)'; input.value = ui.query; input.setAttribute('aria-label', 'Buscar programas'); input.onkeydown = event => { if (event.key === 'Enter') { ui.query = input.value.trim(); safe(() => load('search'))(); } }; toolbar.append(input, button('Buscar', () => { ui.query = input.value.trim(); return load('search'); }, 'primary')); }
-    else toolbar.append(button('Atualizar lista', () => load(ui.tab), 'small'), ui.tab === 'updates' && ui.rows.length ? button('Atualizar tudo', () => operate('upgrade', ui.rows.filter(r => r.actionable)), 'primary small') : elem('span', ''));
+    else toolbar.append(button('Atualizar lista', () => load(ui.tab), 'small'), ui.tab === 'updates' && ui.rows.length ? button('Atualizar tudo', () => ui.source === 'msys2' ? operate('upgrade-all', [{ id: '*', name: 'todo o sistema Unix', source: 'msys2' }]) : operate('upgrade', ui.rows.filter(r => r.actionable)), 'primary small') : elem('span', ''));
     if (ui.tab === 'lists') renderLists(); else renderRows(); renderFooter();
   }
 

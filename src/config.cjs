@@ -28,7 +28,7 @@ function profile(input) {
   const p = { id: /^[a-zA-Z0-9-]{1,80}$/.test(input.id || '') ? input.id : randomUUID(), name: text(input.name || 'Sessão'), group: groupPath(input.group), type: input.type };
   if (p.type === 'x11') return p;
   if (p.type === 'local') {
-    if (!['powershell', 'cmd', 'bash', 'wsl', 'busybox'].includes(input.shell)) throw new Error('Shell inválido.');
+    if (!['powershell', 'cmd', 'bash', 'wsl', 'busybox', 'msys2'].includes(input.shell)) throw new Error('Shell inválido.');
     p.shell = input.shell; p.cwd = text(input.cwd || '', 2048);
   } else if (p.type === 'serial') {
     if (!/^COM\d+$/i.test(input.device || '')) throw new Error('Use uma porta COM válida.');

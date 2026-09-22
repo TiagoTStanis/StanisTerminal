@@ -85,7 +85,7 @@ export function setupTree(ctx) {
   function sessionRow(p, depth, saved) {
     const row = elem('div', '', 'tree-row session'); row.style.setProperty('--depth', depth); row.draggable = !!p.id; row.dataset.id = p.id || '';
     const open = elem('button', '', 'tree-main'); open.type = 'button'; open.title = `${p.name}${p.host ? ' — ' + p.host : ''}`;
-    const info = elem('span', '', 'tree-label'); info.append(elem('span', p.name, 'tree-name'), elem('small', p.type === 'local' ? { powershell: 'PowerShell', cmd: 'Prompt de comando', bash: 'Git Bash', wsl: 'Linux (WSL)', busybox: 'Comandos Unix' }[p.shell] : p.type === 'serial' ? `${p.device} · ${p.baudRate}` : p.host ? `${p.username ? p.username + '@' : ''}${p.host}${saved ? ' 🔒' : ''}` : ''));
+    const info = elem('span', '', 'tree-label'); info.append(elem('span', p.name, 'tree-name'), elem('small', p.type === 'local' ? { powershell: 'PowerShell', cmd: 'Prompt de comando', bash: 'Git Bash', wsl: 'Linux (WSL)', busybox: 'Comandos Unix', msys2: 'Unix com pacman' }[p.shell] : p.type === 'serial' ? `${p.device} · ${p.baudRate}` : p.host ? `${p.username ? p.username + '@' : ''}${p.host}${saved ? ' 🔒' : ''}` : ''));
     open.append(elem('span', BADGE[p.type] || p.type.toUpperCase(), 'badge badge-' + p.type), info); open.onclick = safe(() => openSession(p));
     row.append(open);
     if (p.id) {
@@ -126,7 +126,7 @@ export function setupTree(ctx) {
 
   function render() {
     const list = $('sessions-list'); list.replaceChildren(); const filter = $('filter-sessions').value.trim().toLowerCase();
-    const locals = ['powershell', 'cmd', 'bash', 'wsl', 'busybox'].map(localProfile).filter(p => !filter || matches(p, filter));
+    const locals = ['powershell', 'cmd', 'bash', 'wsl', 'busybox', 'msys2'].map(localProfile).filter(p => !filter || matches(p, filter));
     if (locals.length) { const s = section('Terminais locais', '@local'); list.append(s.head); if (s.open || filter) for (const p of locals) list.append(sessionRow(p, 0)); }
     const tree = build(state().config.profiles, state().config.folders || []);
     const mine = section('Minhas conexões', '@mine'); const body = document.createElement('div'); renderNode(tree, 0, body, filter);

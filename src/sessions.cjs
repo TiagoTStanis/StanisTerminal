@@ -17,6 +17,7 @@ function localCommand(profile, toolPath) {
     bash: [path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Git', 'bin', 'bash.exe'), ['--login', '-i']]
   };
   if (profile.shell === 'busybox' && toolPath) commands.busybox = [toolPath('busybox'), ['sh']];
+  if (profile.shell === 'msys2' && toolPath) commands.msys2 = [toolPath('msys2'), ['--login', '-i'], { MSYSTEM: 'MSYS', CHERE_INVOKING: '1' }];
   return commands[profile.shell];
 }
 class Sessions {
@@ -33,11 +34,11 @@ class Sessions {
     this.items.set(id, item);
     try {
       if (profile.type === 'local') {
-        const [command, args] = localCommand(profile, this.toolPath);
+        const [command, args, extraEnv] = localCommand(profile, this.toolPath);
         if (!fs.existsSync(command)) throw new Error(`Componente não instalado: ${command}`);
         const cwd = profile.cwd || os.homedir();
         if (!fs.statSync(cwd).isDirectory()) throw new Error('Pasta inicial inválida.');
-        const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
+        const env = { ...process.env, ...extraEnv, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
         delete env.ELECTRON_RUN_AS_NODE;
         const processPty = pty.spawn(command, args, { name: 'xterm-256color', cols, rows, cwd, env, useConpty: true });
         item.write = value => processPty.write(value); item.resize = (c, r) => processPty.resize(c, r); item.kill = () => processPty.kill();
@@ -79,11 +80,7 @@ class Sessions {
           if (!handshake) { handshake = true; if (bytes[0] !== 0) data('\r\nServidor recusou o handshake.\r\n'); bytes = bytes.subarray(1); if (profile.type === 'rlogin') item.resize(cols, rows); }
           if (bytes.length) data(decoder.write(bytes));
         });
-        socket.on('error', error => data(`
-
-${error.message}
-
-`)); socket.on('close', () => { data(decoder.end()); end(0); });
+        socket.on('error', error => data(`\r\n${error.message}\r\n`)); socket.on('close', () => { data(decoder.end()); end(0); });
       } else if (profile.type === 'serial') {
         const serial = new SerialPort({ path: profile.device, baudRate: profile.baudRate, autoOpen: false });
         await new Promise((resolve, reject) => serial.open(error => error ? reject(error) : resolve()));

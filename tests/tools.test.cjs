@@ -62,5 +62,5 @@ test('cancelar a confirmação não baixa nada; HTTP puro é recusado em produç
 });
 
 test('catálogo oficial só tem HTTPS, hash de 64 hex e limite de tamanho', () => {
-  for (const [id, item] of Object.entries(CATALOG)) { assert.match(item.url, /^https:\/\//, id); assert.match(item.sha256, /^[0-9a-f]{64}$/, id); assert.ok(item.maxBytes > 0 && item.maxBytes <= 50 * 1024 * 1024, id); }
+  for (const [id, item] of Object.entries(CATALOG)) { assert.match(item.url, /^https:\/\//, id); assert.match(item.sha256, /^[0-9a-f]{64}$/, id); assert.ok(item.maxBytes > 0 && item.maxBytes <= 100 * 1024 * 1024, id); }
 });
