@@ -6,7 +6,7 @@ O projeto se inspira no uso de sessões do MobaXterm e do WindTerm. É um aplica
 
 ## Para usar
 
-Baixe **StanisTerminal-1.1.0-win-x64.exe** na página de [Releases](https://github.com/TiagoTStanis/StanisTerminal/releases) e abra. Ele extrai os componentes antes de iniciar e demora um pouco mais na primeira vez. Não precisa instalar Node.js, Python ou Electron. Use Windows 10/11 de 64 bits e uma pasta em que você possa salvar arquivos, como Documentos. Confira o SHA-256 informado na página do release.
+Baixe **StanisTerminal-1.1.0-win-x64.exe** na página de [Releases](https://github.com/TiagoTStanis/StanisTerminal/releases) e abra. Ele extrai os componentes antes de iniciar e demora um pouco mais na primeira vez. Não precisa instalar Node.js, Python ou Electron. Use Windows 10/11 de 64 bits e uma pasta em que você possa salvar arquivos, como Documentos. Confira o SHA-256 e a assinatura GPG do release (veja [como verificar](docs/VERIFICAR-ASSINATURA.md); impressão digital `A345 44C3 43F2 E16B EF64  C7A4 95A1 3721 ED00 B9E6`).
 
 1. Clique em **Abrir PowerShell** para trabalhar neste computador.
 2. Para acessar um servidor, clique em **Nova sessão**, escolha o protocolo e preencha nome, endereço e usuário. Salve e clique no perfil na barra lateral.
