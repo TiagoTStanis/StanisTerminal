@@ -18,6 +18,9 @@ class RdpHost : Form {
     [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr hwnd, int index, int value);
     [DllImport("user32.dll")] static extern bool MoveWindow(IntPtr hwnd, int x, int y, int w, int h, bool repaint);
     [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr context);
+    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hwnd, IntPtr hwndInsertAfter, int x, int y, int w, int h, uint flags);
+    static readonly IntPtr HWND_TOP = IntPtr.Zero;
+    const uint SWP_NOACTIVATE = 0x0010;
     readonly JavaScriptSerializer json = new JavaScriptSerializer();
     readonly RdpControl rdp = new RdpControl();
     IntPtr parent;
@@ -58,7 +61,11 @@ class RdpHost : Form {
             if (cmd == "bounds") {
                 if (!Convert.ToBoolean(p["visible"])) { Hide(); return; }
                 MoveWindow(Handle, Convert.ToInt32(p["x"]), Convert.ToInt32(p["y"]), Convert.ToInt32(p["width"]), Convert.ToInt32(p["height"]), true);
-                Show(); return;
+                Show();
+                // Garante que a janela nativa fique acima do conteúdo do Electron na ordem de
+                // empilhamento — sem isso, o controle pode renderizar atrás da página e nunca aparecer.
+                SetWindowPos(Handle, HWND_TOP, 0, 0, 0, 0, SWP_NOACTIVATE | 0x0001 | 0x0002); // SWP_NOSIZE|SWP_NOMOVE
+                return;
             }
             dynamic c = rdp.Com;
             if (cmd == "connect") {

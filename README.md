@@ -6,7 +6,7 @@ O projeto se inspira no uso de sessões do MobaXterm e do WindTerm. É um aplica
 
 ## Para usar
 
-Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.6.2-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
+Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.6.3-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
 
 **Evite a versão de arquivo único** (`StanisTerminal-*-win-x64-PORTATIL-LENTO-usar-o-zip.exe`): ela extrai os componentes a cada execução — não só na primeira — e pode levar mais de um minuto toda vez que você abrir. Use-a apenas para testar rapidamente em um computador onde você não vai instalar nada; para uso do dia a dia, use sempre o ZIP extraído. Não precisa instalar Node.js, Python ou Electron em nenhuma das distribuições. Use Windows 10/11 de 64 bits e uma pasta em que você possa salvar arquivos, como Documentos. Consulte os arquivos já publicados em [Releases](https://github.com/TiagoTStanis/StanisTerminal/releases); gerar um pacote local não o publica automaticamente. Para arquivos publicados, confira o SHA-256 e a assinatura GPG do release (veja [como verificar](docs/VERIFICAR-ASSINATURA.md); impressão digital `A345 44C3 43F2 E16B EF64  C7A4 95A1 3721 ED00 B9E6`).
 
@@ -19,7 +19,9 @@ O [manual de uso](docs/LEIA-ME.md) explica backups, X11, atalhos e mensagens com
 
 ## Recursos
 
-**Novo na 1.6.2:**
+**Novo na 1.6.3 (correção, confiança parcial — veja abaixo):** RDP conectando mas sem mostrar a tela (ficava travado em "Conectando à área de trabalho…"). Duas causas prováveis corrigidas: (1) o controle ActiveX só vincula corretamente sua superfície de vídeo se a janela já estiver visível e com tamanho real *antes* de `Connect()` — agora ela é mostrada com um tamanho provisório assim que a conexão começa, corrigida para o tamanho exato do painel logo em seguida; (2) a janela nativa agora é explicitamente trazida para o topo da ordem de empilhamento sempre que exibida, para não ficar renderizada atrás do conteúdo do Electron. **Não foi possível validar contra um servidor RDP real neste ambiente** (sem servidor de teste disponível) — se ainda não aparecer a tela, avise com detalhes (a mensagem de erro, se houver).
+
+**Da 1.6.2:**
 - **Transferência de arquivos e clipboard no RDP sem precisar do compartilhamento C$:** o controle agora liga os dois canais virtuais oficiais do RDP — `RedirectClipboard` (copiar/colar texto e arquivos entre local e remoto, direto no Explorer) e `RedirectDrives` (suas unidades locais aparecem como `\\tsclient\` dentro da sessão remota). É o mesmo mecanismo usado por qualquer área de trabalho remota corporativa (e, por baixo dos panos, pelo próprio RustDesk para RDP) — não afeta login nem outras sessões conectadas ao servidor. A aba **Rede** continua existindo como alternativa (útil para VNC, que não tem esse recurso no protocolo).
 - **Prompt colorido** nos terminais locais (PowerShell, cmd, bash/WSL/MSYS2): usuário, host e pasta atual em cores, no estilo MobaXterm. Pode ser desligado em Preferências.
 - **Destaque automático de erros e avisos** na saída do terminal: palavras como "error"/"erro", "failed"/"falhou" e "warning"/"aviso" ficam coloridas automaticamente, mesmo em comandos que não colorem a própria saída. Pode ser desligado em Preferências.

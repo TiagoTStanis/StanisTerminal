@@ -48,7 +48,16 @@ class Graphics {
     });
     child.stdin.on('error', () => {});
     child.on('exit', () => this.emit('graphics:state', { id, type: 'close' }));
-    try { await ready; child.stdin.write(JSON.stringify({ cmd: 'connect', host: profile.host, port: profile.port, username: profile.username, password }) + '\n'); }
+    try {
+      await ready;
+      // Mostra e dimensiona a janela nativa ANTES de conectar: alguns controles ActiveX (como o
+      // MsRdpClient) só vinculam a superfície de vídeo corretamente se já estiverem visíveis e com
+      // tamanho real no momento do Connect(). Sem isso, a conexão completa mas a tela nunca aparece —
+      // o painel real do lado do renderer corrige a posição/tamanho exatos logo em seguida.
+      const content = this.window.getContentBounds();
+      this.bounds(id, { x: 0, y: 0, width: Math.max(200, content.width), height: Math.max(200, content.height), visible: true });
+      child.stdin.write(JSON.stringify({ cmd: 'connect', host: profile.host, port: profile.port, username: profile.username, password }) + '\n');
+    }
     catch (error) { this.close(id); throw error; }
     return { id, name: profile.name, profile };
   }
