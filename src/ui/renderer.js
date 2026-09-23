@@ -27,6 +27,13 @@ const sessions = new Map();
 const fileState = { kind: 'local', id: '', path: '', parent: '', network: false };
 const dialogQueue = [];
 let currentDialog = null;
+// Botão único de tela cheia para VNC/RDP: alterna (não só entra), o rótulo reflete o estado atual, e
+// funciona mesmo se a tela cheia for encerrada por fora (Esc, F11) — não só pelo próprio botão.
+function fullscreenButton(pane) {
+  const btn = button('⛶ Tela cheia', () => { if (document.fullscreenElement === pane) document.exitFullscreen(); else pane.requestFullscreen(); });
+  document.addEventListener('fullscreenchange', () => { btn.textContent = document.fullscreenElement === pane ? '⛶ Sair da tela cheia' : '⛶ Tela cheia'; });
+  return btn;
+}
 const PALETTES = {
   dark: { background: '#0d1420', foreground: '#d2e0ef', cursor: '#50d8bc', selectionBackground: '#315365', black: '#172231', red: '#ee7d8b', green: '#6cd6a1', yellow: '#e8c47b', blue: '#7ab8f4', magenta: '#c298e8', cyan: '#64d4dd', white: '#e1e9f1' },
   light: { background: '#ffffff', foreground: '#1f2933', cursor: '#2563eb', selectionBackground: '#cfe0ff', selectionForeground: '#1f2933', black: '#1f2933', red: '#c62828', green: '#1b7f4b', yellow: '#946200', blue: '#1d4fd0', magenta: '#8b3fb5', cyan: '#0c7a8a', white: '#8a94a3', brightBlack: '#6b7785', brightRed: '#e53935', brightGreen: '#2e9e63', brightYellow: '#b57a00', brightBlue: '#3b6fe8', brightMagenta: '#a557cf', brightCyan: '#1596a8', brightWhite: '#4b5563' },
@@ -186,7 +193,7 @@ async function openSession(profile) {
       bar.append(
         button('⌨ Ctrl+Alt+Del', () => item.rfb.sendCtrlAltDel()),
         button('📋 Colar texto', sendClipboard),
-        button('⛶ Tela cheia', () => item.pane.requestFullscreen())
+        fullscreenButton(item.pane)
       );
       item.pane.append(bar);
       await call('graphics:activate', item.id);
@@ -199,7 +206,7 @@ async function openSession(profile) {
 let ironRdp = null;
 async function loadIronRdp() {
   if (ironRdp) return ironRdp;
-  const mod = await import('ironrdp-wasm');
+  const mod = await import('../../vendor/ironrdp-wasm/rdp_client.js');
   await mod.default('stanis://app/rdp_client_bg.wasm');
   mod.setup('warn');
   ironRdp = mod; return mod;
@@ -237,6 +244,65 @@ async function openRdp(item, result) {
     await item.rdpSession.onClipboardPaste(data);
   })();
   builder.forceClipboardUpdateCallback(sendClipboard);
+  // Transferência de arquivo pelo canal CLIPRDR: enviar = arrasta/escolhe arquivo local, o servidor
+  // "puxa" o conteúdo em pedaços; receber = copiar um arquivo no Explorer remoto habilita o botão
+  // Baixar aqui. O renderer não tem fs (sandbox), cada pedaço lido/gravado passa pelo IPC.
+  const uploadedFiles = new Map(); let pendingDownloads = new Map(); const streamToFile = new Map();
+  const submitFileContents = (streamId, isError, data) => item.rdpSession.invokeExtension(new rdp.Extension('submit_file_contents', { stream_id: streamId, is_error: isError, data }));
+  const downloadBtn = button('⬇ Baixar arquivo', async () => {
+    if (!pendingDownloads.size) { toast('Copie um arquivo no Explorer remoto primeiro.'); return; }
+    for (const [index, info] of pendingDownloads) {
+      streamToFile.set(index + 1, { ...info, fileIndex: index });
+      item.rdpSession.invokeExtension(new rdp.Extension('request_file_contents', { stream_id: index + 1, file_index: index, flags: 1, position: 0, size: 8, clip_data_id: info.clipDataId }));
+    }
+  });
+  downloadBtn.disabled = true;
+  const uploadBtn = button('⬆ Enviar arquivo', async () => {
+    const files = await call('rdp:pickUpload'); if (!files.length) return;
+    files.forEach((file, index) => uploadedFiles.set(index, file));
+    item.rdpSession.invokeExtension(new rdp.Extension('initiate_file_copy', files.map(f => ({ name: f.name, size: f.size, lastModified: Date.now() }))));
+    toast('Cole no Explorer remoto (Ctrl+V) para concluir o envio.');
+  });
+  builder.extension(new rdp.Extension('files_available_callback', (files, clipDataId) => {
+    pendingDownloads = new Map((files || []).map((f, i) => [i, { ...f, clipDataId }]));
+    downloadBtn.disabled = !pendingDownloads.size;
+    if (pendingDownloads.size) toast('Arquivo disponível — clique em Baixar arquivo.');
+  }));
+  async function onFileContentsRequest(request) {
+    const file = uploadedFiles.get(request.index);
+    if (!file) { submitFileContents(request.streamId, true, new Uint8Array(0)); return; }
+    if (request.flags & 1) {
+      const sizeBytes = new Uint8Array(8); new DataView(sizeBytes.buffer).setBigUint64(0, BigInt(file.size), true);
+      submitFileContents(request.streamId, false, sizeBytes);
+    } else if (request.flags & 2) {
+      const chunk = await call('rdp:readChunk', file.path, request.position, request.size);
+      submitFileContents(request.streamId, false, new Uint8Array(chunk));
+    }
+  }
+  builder.extension(new rdp.Extension('file_contents_request_callback', request => {
+    onFileContentsRequest(request).catch(() => submitFileContents(request.streamId, true, new Uint8Array(0)));
+  }));
+  async function onFileContentsResponse(response) {
+    const info = streamToFile.get(response.streamId); if (!info) return;
+    if (response.isError) { streamToFile.delete(response.streamId); return; }
+    if (!info.chunks) { info.chunks = []; info.received = 0; }
+    if (response.data.length === 8 && info.expectedSize === undefined) {
+      info.expectedSize = Number(new DataView(response.data.buffer).getBigUint64(0, true));
+      const dataStreamId = response.streamId + 1000; streamToFile.set(dataStreamId, info);
+      item.rdpSession.invokeExtension(new rdp.Extension('request_file_contents', { stream_id: dataStreamId, file_index: info.fileIndex, flags: 2, position: 0, size: info.expectedSize, clip_data_id: info.clipDataId }));
+      return;
+    }
+    info.chunks.push(new Uint8Array(response.data)); info.received += response.data.length;
+    if (info.received < info.expectedSize) return;
+    streamToFile.delete(response.streamId);
+    const blob = new Blob(info.chunks); const buffer = new Uint8Array(await blob.arrayBuffer());
+    const saved = await call('rdp:saveDownload', info.name, buffer);
+    if (saved) toast(`Salvo: ${saved}`);
+  }
+  builder.extension(new rdp.Extension('file_contents_response_callback', response => safe(onFileContentsResponse)(response)));
+  builder.extension(new rdp.Extension('lock_callback', () => {}));
+  builder.extension(new rdp.Extension('unlock_callback', () => {}));
+  builder.extension(new rdp.Extension('locks_expired_callback', () => {}));
   builder.setCursorStyleCallbackContext(canvas);
   builder.setCursorStyleCallback(style => { canvas.style.cursor = style || 'default'; });
   try { item.rdpSession = await builder.connect(); }
@@ -268,7 +334,8 @@ async function openRdp(item, result) {
       tx.addEvent(rdp.DeviceEvent.keyReleased(0x53)); tx.addEvent(rdp.DeviceEvent.keyReleased(0x38)); tx.addEvent(rdp.DeviceEvent.keyReleased(0x1D));
     })),
     button('📋 Colar texto', sendClipboard),
-    button('⛶ Tela cheia', () => item.pane.requestFullscreen())
+    uploadBtn, downloadBtn,
+    fullscreenButton(item.pane)
   );
   item.pane.append(bar);
   item.rdpSession.run().then(info => {

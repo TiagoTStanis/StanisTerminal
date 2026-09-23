@@ -146,11 +146,12 @@ async function performRDPHandshake(host, port, x224Request, options = {}) {
   });
 }
 function setupTlsRelay(ws, tlsSocket) {
-  const cleanup = () => { if (!tlsSocket.destroyed) tlsSocket.destroy(); if (ws.readyState === 1) try { ws.close(); } catch { /* já fechado */ } };
-  tlsSocket.on('data', data => { try { if (ws.readyState === 1) ws.send(data); } catch { /* WS fechado */ } });
-  ws.on('message', data => { try { tlsSocket.write(Buffer.isBuffer(data) ? data : Buffer.from(data)); } catch { /* TLS já fechado */ } });
-  tlsSocket.on('end', cleanup); tlsSocket.on('error', cleanup); tlsSocket.on('close', cleanup);
-  ws.on('close', cleanup); ws.on('error', cleanup);
+  let toWs = 0, toTls = 0;
+  const cleanup = (reason) => { log(`Relay encerrado (${reason}): ${toWs}B recebidos, ${toTls}B enviados`); if (!tlsSocket.destroyed) tlsSocket.destroy(); if (ws.readyState === 1) try { ws.close(); } catch { /* já fechado */ } };
+  tlsSocket.on('data', data => { toWs += data.length; try { if (ws.readyState === 1) ws.send(data); } catch { /* WS fechado */ } });
+  ws.on('message', data => { toTls += data.length || data.byteLength || 0; try { tlsSocket.write(Buffer.isBuffer(data) ? data : Buffer.from(data)); } catch { /* TLS já fechado */ } });
+  tlsSocket.on('end', () => cleanup('servidor encerrou a conexão TLS')); tlsSocket.on('error', e => cleanup('erro de TLS: ' + e.message)); tlsSocket.on('close', hadError => cleanup(hadError ? 'conexão TLS fechada com erro' : 'conexão TLS fechada'));
+  ws.on('close', (code, reason) => cleanup(`WebSocket fechado pelo cliente (code=${code}${reason ? ', ' + reason : ''})`)); ws.on('error', e => cleanup('erro de WebSocket: ' + e.message));
 }
 function handleConnection(ws, options = {}) {
   ws.once('message', async data => {

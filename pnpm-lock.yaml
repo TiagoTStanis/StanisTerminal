@@ -32,9 +32,6 @@ importers:
       fengari:
         specifier: 0.1.5
         version: 0.1.5
-      ironrdp-wasm:
-        specifier: 1.1.0
-        version: 1.1.0
       node-pty:
         specifier: 1.1.0
         version: 1.1.0
@@ -901,9 +898,6 @@ packages:
   ip-address@10.7.2:
     resolution: {integrity: sha512-7H/2gFSIitxc0hG3nOI1glS8QLo/EHBFFLk8vEUjXY/xu0AdL8jZ9U1IzO2PUm0d2D/ofQcAifb0g6OBkt8U7w==}
     engines: {node: '>= 12'}
-
-  ironrdp-wasm@1.1.0:
-    resolution: {integrity: sha512-AKF9Du3DeFIO3ej3pRQmAXAnwNAU8/rLsep1od3NW9WRYqmslQMA7skjJW/E/+BH3EtNHnjxyAgAkvtyucSRQQ==}
 
   is-fullwidth-code-point@3.0.0:
     resolution: {integrity: sha512-zymm5+u+sCsSWyD9qNaejV3DFvhCKclKdizYaJUuHA83RLjb7nSuGnddCHGv0hk+KY7BMAlsWeK4Ueg6EV6XQg==}
@@ -2388,8 +2382,6 @@ snapshots:
   inherits@2.0.4: {}
 
   ip-address@10.7.2: {}
-
-  ironrdp-wasm@1.1.0: {}
 
   is-fullwidth-code-point@3.0.0: {}
 

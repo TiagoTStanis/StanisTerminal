@@ -7,7 +7,10 @@ fs.mkdirSync(path.join(root, 'src/ui/vendor'), { recursive: true });
 fs.copyFileSync(require.resolve('@xterm/xterm/css/xterm.css'), path.join(root, 'src/ui/vendor/xterm.css'));
 // O binário .wasm não é importado por JS (é buscado em runtime via fetch relativo ao módulo), então
 // não passa pelo bundler — precisa ficar fisicamente ao lado de app.js, como o glue JS espera.
-fs.copyFileSync(path.join(path.dirname(require.resolve('ironrdp-wasm')), 'rdp_client_bg.wasm'), path.join(root, 'src/ui/rdp_client_bg.wasm'));
+// Compilado do IronRDP mais recente (vendor/ironrdp-wasm) em vez do pacote npm "ironrdp-wasm", que
+// estava parado em abril/2026 — sem correções importantes de decodificação de PDU (ex.: Font Map vazio
+// do VirtualBox, Share Data PDU com totalLength subestimado) mescladas só em julho/agosto.
+fs.copyFileSync(path.join(root, 'vendor/ironrdp-wasm/rdp_client_bg.wasm'), path.join(root, 'src/ui/rdp_client_bg.wasm'));
 esbuild.buildSync({ entryPoints: [path.join(root, 'src/ui/renderer.js')], bundle: true, format: 'esm', outfile: path.join(root, 'src/ui/app.js'), platform: 'browser', target: 'chrome140', minify: false, define: { 'process.env.FENGARICONF': 'undefined', 'process.versions.node': '"0"' }, alias: { fs: path.join(root, 'scripts/browser-stub.cjs'), os: path.join(root, 'scripts/browser-stub.cjs'), 'readline-sync': path.join(root, 'scripts/browser-stub.cjs'), tmp: path.join(root, 'scripts/browser-stub.cjs'), child_process: path.join(root, 'scripts/browser-stub.cjs'), path: path.join(root, 'scripts/browser-stub.cjs') } });
 if (process.platform === 'win32') {
   execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(root, 'scripts/icon.ps1')], { stdio: 'inherit', windowsHide: true });

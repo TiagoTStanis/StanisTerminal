@@ -1,6 +1,6 @@
 {
   "name": "stanis-terminal",
-  "version": "1.7.2",
+  "version": "1.8.0",
   "description": "Terminal local para Windows, sem IA, com sessões e ferramentas de infraestrutura.",
   "main": "src/main.cjs",
   "author": "Tiago Torres Stanis",
@@ -32,7 +32,6 @@
     "@xterm/xterm": "6.0.0",
     "basic-ftp": "6.2.1",
     "fengari": "0.1.5",
-    "ironrdp-wasm": "1.1.0",
     "node-pty": "1.1.0",
     "serialport": "13.0.0",
     "socks": "2.8.10",

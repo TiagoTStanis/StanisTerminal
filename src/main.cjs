@@ -217,6 +217,24 @@ function register() {
     const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
     return lines.slice(-40).join('\n');
   });
+  // Transferência de arquivo do RDP (canal CLIPRDR, via extensão do ironrdp-wasm): o renderer não tem
+  // acesso a fs (contextIsolation/sandbox), então cada leitura/gravação passa por aqui.
+  handle('rdp:pickUpload', async () => {
+    const result = await dialog.showOpenDialog(window, { properties: ['openFile', 'multiSelections'] });
+    if (result.canceled) return [];
+    return result.filePaths.map(filePath => ({ name: path.basename(filePath), size: fs.statSync(filePath).size, path: filePath }));
+  });
+  handle('rdp:readChunk', async (filePath, position, size) => {
+    const handle = await fsp.open(filePath, 'r');
+    try { const buffer = Buffer.alloc(size); const { bytesRead } = await handle.read(buffer, 0, size, position); return buffer.subarray(0, bytesRead); }
+    finally { await handle.close(); }
+  });
+  handle('rdp:saveDownload', async (suggestedName, data) => {
+    const result = await dialog.showSaveDialog(window, { defaultPath: text(suggestedName, 255) });
+    if (result.canceled) return null;
+    await fsp.writeFile(result.filePath, Buffer.from(data));
+    return result.filePath;
+  });
   handle('serial:list', () => SerialPort.list());
   handle('clipboard:read', () => clipboard.readText());
   handle('clipboard:write', value => { if (typeof value === 'string' && value.length < 5000000) clipboard.writeText(value); });
