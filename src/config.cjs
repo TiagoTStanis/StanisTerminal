@@ -15,6 +15,14 @@ function groupPath(value) {
 }
 function host(value) {
   value = text(value);
+  // IPv4 com zero à esquerda (ex.: 10.0.0.07, comum em planilhas de rede): o Node não o aceita como IP e
+  // tentaria resolvê-lo no DNS (ENOTFOUND). Lê cada parte em decimal, que é o que se quer dizer.
+  const octets = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(value);
+  if (octets) {
+    const numbers = octets.slice(1).map(Number);
+    if (numbers.some(n => n > 255)) throw new Error('IP inválido: cada parte vai de 0 a 255.');
+    value = numbers.join('.');
+  }
   if (!require('node:net').isIP(value) && !/^[a-zA-Z0-9][a-zA-Z0-9.:%_-]*$/.test(value)) throw new Error('Host inválido. Use nome DNS ou IP, sem opções de comando.');
   return value;
 }
