@@ -1,55 +1,57 @@
-// Realce de sintaxe para terminais remotos (SSH, Telnet, serial…), no estilo do MobaXterm: switches e
-// roteadores quase nunca mandam cor, então o app colore na tela palavras de estado, IPs, MACs, interfaces
-// e o prompt. Só insere códigos ANSI de cor de texto: nada muda no que o equipamento recebe ou envia.
+// Realce de sintaxe para terminais remotos (SSH, Telnet, serial…) com as regras prontas do ChromaTerm
+// (https://github.com/hSaria/ChromaTerm, MIT): padrão (IPs, MACs, datas, horas, números, tamanhos, URLs e
+// palavras boas/ruins) e, no modo "rede", também as regras da comunidade para Cisco, Juniper e rede em geral.
+// Só insere códigos ANSI de cor na tela: nada muda no que o equipamento recebe ou envia.
+import { RULE_SETS } from './chromaterm-rules.js';
 
 // Sequências de escape que o servidor já mandou (CSI, OSC, ESC + 1 caractere) ficam intactas: o realce
 // só age no texto entre elas, então cores do próprio servidor e movimentos de cursor não quebram.
 const ESCAPE = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\-_])/g;
 
-const OCTET = '(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)';
-const HEX = '[0-9a-f]{1,4}';
-// Um grupo por categoria; a ordem importa ("administratively down" antes de "down", MAC antes de IPv6).
-const PATTERN = new RegExp([
-  // Prompt no começo da linha, sozinho ou já com o comando: SW-CORE#, SW-CORE#show run, switch>,
-  // R1(config-if)#, <HUAWEI>, [HUAWEI], [~HUAWEI]
-  '(?<prompt>(?:^|(?<=[\\r\\n]))(?:[\\w.\\-]+(?:\\([\\w.\\-]+\\))?[#>]|(?:<[\\w.\\-]+>|\\[~?[\\w.\\-]+\\])(?=\\s|$)))',
-  // Interfaces: GigabitEthernet1/0/1, Gi1/0/1, Te1/1/1, Port-channel1, Vlan10, Loopback0, ge-0/0/0, ae1…
-  '(?<iface>\\b(?:(?:(?:Hundred|FortyGig|TwentyFive|Twenty|TenGig|Ten|Five|Two)?Gig(?:abit)?(?:Ethernet|E)|FastEthernet|Ethernet|Port-channel|Bundle-Ether|Vlan-interface|Vlanif|Vlan|Loopback|Tunnel|Serial|Management|mgmt)\\s?|Gi|Fa|Te|Tw|Fo|Hu|Eth|Et|Po|Vl|Lo|Tu|Se|Ma)\\d+(?:[/:]\\d+)*(?:\\.\\d+)?\\b|\\b(?:(?:ge|xe|et|fe)-|ae|irb|em|fxp)\\d+(?:[/:]\\d+)*(?:\\.\\d+)?\\b)',
-  // MAC: aa:bb:cc:dd:ee:ff, aa-bb-…, aabb.ccdd.eeff (Cisco) e aabb-ccdd-eeff (HP/Huawei)
-  '(?<mac>\\b[0-9a-f]{2}(?:[:-][0-9a-f]{2}){5}\\b|\\b[0-9a-f]{4}(?<sep>[.-])[0-9a-f]{4}\\k<sep>[0-9a-f]{4}\\b)',
-  // IPv4 (com /máscara opcional) e IPv6 (8 grupos ou forma com ::, que não se confunde com horários)
-  `(?<ip>\\b${OCTET}(?:\\.${OCTET}){3}(?:/\\d{1,2})?\\b|\\b${HEX}(?::${HEX}){7}\\b|(?:\\b${HEX}(?::${HEX}){0,6})?::(?:${HEX}(?::${HEX}){0,6}\\b)?(?:/\\d{1,3})?)`,
-  // Estados — palavra inteira e não seguida de hífen (running-config, down-link não são estado)
-  '(?<warn>\\badministratively down\\b|\\b(?:warning|warn|aviso|atenção|deprecated|half|learning|listening|degraded|standby|notpresent)(?![\\w-]))',
-  '(?<bad>\\b(?:down|notconnect|not connected|err-disabled|errdisable|disabled|blocking|failed|failure|error|errors|erro|falhou|falha|fatal|panic|exception|denied|unreachable|timeout|timed out|inactive|shutdown|invalid|incomplete|critical)(?![\\w-]))',
-  '(?<good>\\b(?:up|connected|enabled|forwarding|established|full|active|reachable|success|successful|sucesso|online|running)(?![\\w-]))',
-].join('|'), 'gi');
-
-const COLOR = {
-  prompt: ['\x1b[1;95m', '\x1b[22;39m'],
-  iface: ['\x1b[1;94m', '\x1b[22;39m'],
-  mac: ['\x1b[36m', '\x1b[39m'],
-  ip: ['\x1b[36m', '\x1b[39m'],
-  warn: ['\x1b[93m', '\x1b[39m'],
-  bad: ['\x1b[91m', '\x1b[39m'],
-  good: ['\x1b[92m', '\x1b[39m'],
+const rgb = hex => [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16)).join(';');
+function compile(rules) {
+  return rules.map(rule => ({
+    regex: new RegExp(rule.source, 'gm' + rule.flags),
+    exclusive: rule.exclusive,
+    open: rule.fg ? `\x1b[38;2;${rgb(rule.fg)}m` : `\x1b[48;2;${rgb(rule.bg)}m`,
+    close: rule.fg ? '\x1b[39m' : '\x1b[49m',
+  }));
+}
+// Como no ChromaTerm, um trecho de regra "exclusiva" (IP, MAC, interface…) não é recolorido por outra regra;
+// por isso as exclusivas vão primeiro. As regras de rede vêm antes das gerais.
+const ordered = rules => [...rules.filter(r => r.exclusive), ...rules.filter(r => !r.exclusive)];
+const SETS = {
+  network: compile(ordered([...RULE_SETS.cisco, ...RULE_SETS.networking, ...RULE_SETS.juniper, ...RULE_SETS.default])),
+  general: compile(ordered(RULE_SETS.default)),
 };
 
-function colorText(text) {
-  return text.replace(PATTERN, (match, ...args) => {
-    const groups = args[args.length - 1];
-    const kind = Object.keys(COLOR).find(name => groups[name] !== undefined);
-    if (!kind || !match) return match;
-    const [open, close] = COLOR[kind];
-    return open + match + close;
-  });
+function colorText(text, rules) {
+  if (!text) return text;
+  const spans = [];
+  const free = (start, end) => spans.every(s => end <= s.start || start >= s.end);
+  for (const rule of rules) {
+    rule.regex.lastIndex = 0;
+    for (const match of text.matchAll(rule.regex)) {
+      const start = match.index, end = start + match[0].length;
+      if (end > start && free(start, end)) spans.push({ start, end, rule });
+    }
+  }
+  if (!spans.length) return text;
+  spans.sort((a, b) => a.start - b.start);
+  let result = '', last = 0;
+  for (const { start, end, rule } of spans) {
+    result += text.slice(last, start) + rule.open + text.slice(start, end) + rule.close;
+    last = end;
+  }
+  return result + text.slice(last);
 }
 
-export function highlight(data) {
+export function highlight(data, set = 'network') {
+  const rules = SETS[set] || SETS.network;
   let result = '', last = 0;
   for (const escape of data.matchAll(ESCAPE)) {
-    result += colorText(data.slice(last, escape.index)) + escape[0];
+    result += colorText(data.slice(last, escape.index), rules) + escape[0];
     last = escape.index + escape[0].length;
   }
-  return result + colorText(data.slice(last));
+  return result + colorText(data.slice(last), rules);
 }

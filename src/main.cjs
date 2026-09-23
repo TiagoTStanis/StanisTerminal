@@ -123,7 +123,8 @@ function register() {
     config.value.settings = { fontSize: Math.max(10, Math.min(28, Number(value.fontSize) || 14)), theme: THEMES.includes(value.theme) ? value.theme : 'light', restoreSessions: value.restoreSessions === undefined ? previous.restoreSessions === true : !!value.restoreSessions, scrollback: Math.max(1000, Math.min(100000, Number(value.scrollback) || 10000)),
       syncFolder: value.syncFolder === undefined ? previous.syncFolder || '' : text(value.syncFolder || '', 2048), autocomplete: value.autocomplete === undefined ? previous.autocomplete !== false : !!value.autocomplete,
       highlightErrors: value.highlightErrors === undefined ? previous.highlightErrors !== false : !!value.highlightErrors,
-      checkOnline: value.checkOnline === undefined ? previous.checkOnline !== false : !!value.checkOnline };
+      checkOnline: value.checkOnline === undefined ? previous.checkOnline !== false : !!value.checkOnline,
+      highlightSet: ['network', 'general'].includes(value.highlightSet) ? value.highlightSet : previous.highlightSet || 'network' };
     config.save(); return config.value.settings;
   });
   handle('macros:save', values => {

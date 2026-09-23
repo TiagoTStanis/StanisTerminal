@@ -7,6 +7,7 @@ A licença MIT na raiz se aplica ao código próprio do Stanis Terminal. Os comp
 | Electron | Aplicativo de desktop | https://github.com/electron/electron |
 | xterm.js e addons | Emulação do terminal | https://github.com/xtermjs/xterm.js |
 | node-pty | Processo de terminal local | https://github.com/microsoft/node-pty |
+| Regras do ChromaTerm (MIT) | Realce de sintaxe dos terminais remotos: padrão + Cisco, Juniper e rede (`src/ui/chromaterm-rules.js`, gerado por `scripts/chromaterm/gerar-regras.py` a partir do repositório original) | https://github.com/hSaria/ChromaTerm — licença em `docs/licencas/chromaterm-LICENSE` |
 | ssh2 | SSH, SFTP e encaminhamento | https://github.com/mscdex/ssh2 |
 | noVNC | Cliente VNC | https://github.com/novnc/noVNC |
 | basic-ftp | FTP e FTPS | https://github.com/patrickjuchli/basic-ftp |
