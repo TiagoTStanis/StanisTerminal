@@ -23,6 +23,8 @@ function port(value, fallback = 22) {
   if (!Number.isInteger(result) || result < 1 || result > 65535) throw new Error('Porta deve estar entre 1 e 65535.');
   return result;
 }
+// Resoluções fixas aceitas no RDP; sem valor = acompanha o tamanho do painel.
+const RDP_RESOLUTIONS = ['1024x768', '1280x720', '1280x800', '1366x768', '1440x900', '1600x900', '1920x1080'];
 function profile(input) {
   if (!input || !TYPES.includes(input.type)) throw new Error('Tipo de sessão inválido.');
   const p = { id: /^[a-zA-Z0-9-]{1,80}$/.test(input.id || '') ? input.id : randomUUID(), name: text(input.name || 'Sessão'), group: groupPath(input.group), type: input.type };
@@ -42,6 +44,7 @@ function profile(input) {
     p.keyPath = text(input.keyPath || '', 2048); p.useAgent = !!input.useAgent; p.agentForward = !!input.useAgent && !!input.agentForward;
     p.jumpId = text(input.jumpId || '', 80); if (input.proxyHost) { if (p.jumpId) throw new Error('Use gateway SSH ou proxy SOCKS5, não os dois.'); p.proxyHost = host(input.proxyHost); p.proxyPort = port(input.proxyPort, 1080); }
     if (p.type === 'vnc' && ['windows', 'linux'].includes(input.remoteOS)) p.remoteOS = input.remoteOS;
+    if (p.type === 'rdp' && RDP_RESOLUTIONS.includes(input.resolution)) p.resolution = input.resolution;
   }
   return p;
 }

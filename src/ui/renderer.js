@@ -106,6 +106,7 @@ async function sessionForm(existing = {}) {
     { name: 'host', label: 'Host / IP', value: existing.host || '' }, { name: 'port', label: 'Porta (vazio = padrão)', type: 'number', value: existing.port || '', min: 1, max: 65535 },
     { name: 'username', label: 'Usuário / domínio\\usuário', value: existing.username || '' },
     { name: 'password', label: state.secrets?.[existing.id] ? 'Senha (guardada; deixe vazio para manter)' : 'Senha (opcional; guardada com criptografia do Windows)', type: 'password', wide: true },
+    { name: 'resolution', label: 'Resolução da tela remota', value: existing.resolution || '', options: [{ value: '', label: 'Ajustar à janela' }, ...['1024x768', '1280x720', '1280x800', '1366x768', '1440x900', '1600x900', '1920x1080'].map(v => ({ value: v, label: v.replace('x', ' × ') }))] },
     { name: 'keyPath', label: 'Arquivo de chave privada SSH (opcional)', value: existing.keyPath || '', wide: true },
     { name: 'useAgent', label: 'Usar o agente SSH do Windows (chaves ficam no agente, sem senha)', type: 'checkbox', value: !!existing.useAgent, wide: true },
     { name: 'agentForward', label: 'Encaminhar o agente para o servidor (permite pular deste servidor para outro com a mesma chave)', type: 'checkbox', value: !!existing.agentForward, wide: true },
@@ -118,7 +119,7 @@ async function sessionForm(existing = {}) {
   ], onChange: f => {
     const selected = f.elements.type.value;
     if (selected !== lastType) { f.elements.port.value = ''; lastType = selected; }
-    const show = ['name', 'group', 'newGroup', 'type', ...(selected === 'x11' ? [] : selected === 'xdmcp' ? ['host'] : selected === 'local' ? ['shell', 'cwd'] : selected === 'serial' ? ['device', 'baudRate'] : ['ssh', 'ssh-x11'].includes(selected) ? ['host', 'port', 'username', 'password', 'keyPath', 'useAgent', 'agentForward', 'proxyHost', 'proxyPort', 'jumpId'] : selected === 'rdp' ? ['host', 'port', 'username', 'password'] : selected === 'rlogin' ? ['host', 'port', 'username'] : selected === 'rsh' ? ['host', 'port', 'username', 'command'] : ['host', 'port'])];
+    const show = ['name', 'group', 'newGroup', 'type', ...(selected === 'x11' ? [] : selected === 'xdmcp' ? ['host'] : selected === 'local' ? ['shell', 'cwd'] : selected === 'serial' ? ['device', 'baudRate'] : ['ssh', 'ssh-x11'].includes(selected) ? ['host', 'port', 'username', 'password', 'keyPath', 'useAgent', 'agentForward', 'proxyHost', 'proxyPort', 'jumpId'] : selected === 'rdp' ? ['host', 'port', 'username', 'password', 'resolution'] : selected === 'rlogin' ? ['host', 'port', 'username'] : selected === 'rsh' ? ['host', 'port', 'username', 'command'] : ['host', 'port'])];
     for (const field of $('dialog-fields').querySelectorAll('[data-field]')) { field.hidden = !show.includes(field.dataset.field); for (const input of field.querySelectorAll('input,select')) input.disabled = field.hidden; }
     f.elements.host.required = show.includes('host');
     f.elements.command.required = selected === 'rsh';
@@ -229,7 +230,10 @@ async function openRdp(item, result) {
   let rdp;
   try { rdp = await loadIronRdp(); }
   catch (error) { toast('Não foi possível carregar o componente RDP: ' + (error?.message || error)); item.ended = true; renderTabs(); return; }
-  const width = Math.max(320, Math.round(item.mount.clientWidth || 1280)), height = Math.max(240, Math.round(item.mount.clientHeight || 800));
+  // Resolução fixa do perfil (útil quando o servidor não acompanha a janela, ex.: VirtualBox sem Guest Additions);
+  // sem ela, pede o tamanho do painel.
+  const fixed = /^(\d+)x(\d+)$/.exec(result.profile.resolution || '');
+  const width = fixed ? +fixed[1] : Math.max(320, Math.round(item.mount.clientWidth || 1280)), height = fixed ? +fixed[2] : Math.max(240, Math.round(item.mount.clientHeight || 800));
   const builder = new rdp.SessionBuilder();
   builder.username(result.profile.username || ''); builder.password(result.password || '');
   builder.destination(`${result.profile.host}:${result.profile.port}`);
@@ -237,6 +241,16 @@ async function openRdp(item, result) {
   builder.authToken('none');
   builder.desktopSize(new rdp.DesktopSize(width, height));
   builder.renderCanvas(canvas);
+  // Escala o canvas para caber no painel mantendo a proporção da tela remota (que pode diferir da pedida
+  // e mudar no meio da sessão); o mouse converte de volta pelo getBoundingClientRect.
+  const fit = () => {
+    const w = canvas.width, h = canvas.height, mw = item.mount.clientWidth, mh = item.mount.clientHeight;
+    if (!w || !h || !mw || !mh) return;
+    const scale = Math.min(mw / w, mh / h);
+    canvas.style.width = `${Math.floor(w * scale)}px`; canvas.style.height = `${Math.floor(h * scale)}px`;
+  };
+  new ResizeObserver(fit).observe(item.mount);
+  builder.canvasResizedCallback(() => fit());
   builder.extension(new rdp.Extension('enable_credssp', true));
   builder.remoteClipboardChangedCallback(clipboardData => safe(() => {
     if (clipboardData.isEmpty()) return;
@@ -312,14 +326,15 @@ async function openRdp(item, result) {
   builder.setCursorStyleCallback(style => { canvas.style.cursor = style || 'default'; });
   try { item.rdpSession = await builder.connect(); }
   catch (error) { toast('RDP: ' + rdpErrorText(error)); item.ended = true; renderTabs(); return; }
-  const size = item.rdpSession.desktopSize(); canvas.width = size.width; canvas.height = size.height;
+  const size = item.rdpSession.desktopSize(); canvas.width = size.width; canvas.height = size.height; fit();
   canvas.focus(); toast('RDP conectado.');
   const runInput = (build) => { if (!item.rdpSession) return; const tx = new rdp.InputTransaction(); build(tx); safe(() => item.rdpSession.applyInputs(tx))(); };
   canvas.addEventListener('keydown', event => { event.preventDefault(); const code = scancode(event); if (code === undefined) return; runInput(tx => tx.addEvent(rdp.DeviceEvent.keyPressed(code))); });
   canvas.addEventListener('keyup', event => { event.preventDefault(); const code = scancode(event); if (code === undefined) return; runInput(tx => tx.addEvent(rdp.DeviceEvent.keyReleased(code))); });
   canvas.addEventListener('mousemove', event => {
     const rect = canvas.getBoundingClientRect();
-    const x = Math.round((event.clientX - rect.left) * (canvas.width / rect.width)), y = Math.round((event.clientY - rect.top) * (canvas.height / rect.height));
+    const clamp = (v, max) => Math.min(Math.max(v, 0), max - 1);
+    const x = clamp(Math.round((event.clientX - rect.left) * (canvas.width / rect.width)), canvas.width), y = clamp(Math.round((event.clientY - rect.top) * (canvas.height / rect.height)), canvas.height);
     runInput(tx => tx.addEvent(rdp.DeviceEvent.mouseMove(x, y)));
   });
   canvas.addEventListener('mousedown', event => { event.preventDefault(); canvas.focus(); runInput(tx => tx.addEvent(rdp.DeviceEvent.mouseButtonPressed(event.button))); });

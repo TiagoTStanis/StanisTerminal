@@ -1,0 +1,751 @@
+diff --git a/crates/ironrdp-capture-replay/src/routing.rs b/crates/ironrdp-capture-replay/src/routing.rs
+index eb6915a6..b6527efa 100644
+--- a/crates/ironrdp-capture-replay/src/routing.rs
++++ b/crates/ironrdp-capture-replay/src/routing.rs
+@@ -222,6 +222,7 @@ impl ReplayRouter {
+         }
+ 
+         let active_stage = ActiveStageBuilder {
++            input_flags: ironrdp_pdu::rdp::capability_sets::InputFlags::empty(),
+             static_channels: channels,
+             user_channel_id: state.user_channel_id,
+             io_channel_id: state.io_channel_id,
+diff --git a/crates/ironrdp-client/src/rdp.rs b/crates/ironrdp-client/src/rdp.rs
+index a67d49c9..4c82dc2a 100644
+--- a/crates/ironrdp-client/src/rdp.rs
++++ b/crates/ironrdp-client/src/rdp.rs
+@@ -3040,6 +3040,7 @@ async fn active_session(
+     let activation_factory = connection_result.activation_factory;
+ 
+     let mut active_stage = ActiveStageBuilder {
++        input_flags: connection_result.input_flags,
+         static_channels: connection_result.static_channels,
+         user_channel_id: connection_result.user_channel_id,
+         io_channel_id: connection_result.io_channel_id,
+@@ -4023,7 +4024,7 @@ async fn active_session(
+                         if let ConnectionActivationState::Finalized {
+                             desktop_size,
+                             share_id,
+-                            input_flags: _,
++                            input_flags,
+                             enable_server_pointer,
+                             pointer_software_rendering,
+                             static_channel_chunk_size,
+@@ -4047,6 +4048,7 @@ async fn active_session(
+                             ) {
+                                 return Err(ironrdp_session::general_err!("invalid static channel chunk size"));
+                             }
++                            active_stage.set_input_flags(input_flags);
+                             active_stage.set_window_support_level(window_support_level);
+                             if let Some(monitor_layout) = connection_activation.monitor_layout()
+                                 && !send_active_output_event(
+@@ -5248,6 +5250,7 @@ mod tests {
+                 .is_none()
+         );
+         let mut active_stage = ActiveStageBuilder {
++            input_flags: ironrdp_pdu::rdp::capability_sets::InputFlags::empty(),
+             static_channels,
+             user_channel_id: 1001,
+             io_channel_id: 1003,
+@@ -5285,6 +5288,7 @@ mod tests {
+                 .is_none()
+         );
+         let mut active_stage = ActiveStageBuilder {
++            input_flags: ironrdp_pdu::rdp::capability_sets::InputFlags::empty(),
+             static_channels,
+             user_channel_id: 1001,
+             io_channel_id: 1003,
+diff --git a/crates/ironrdp-session/src/active_stage.rs b/crates/ironrdp-session/src/active_stage.rs
+index f53e0aed..31539417 100644
+--- a/crates/ironrdp-session/src/active_stage.rs
++++ b/crates/ironrdp-session/src/active_stage.rs
+@@ -9,9 +9,10 @@ use ironrdp_egfx::client::GraphicsPipelineClient;
+ use ironrdp_graphics::pointer::DecodedPointer;
+ use ironrdp_pdu::gcc::{ChannelName, Monitor};
+ use ironrdp_pdu::geometry::{ExclusiveRectangle, InclusiveRectangle, Rectangle as _};
+-use ironrdp_pdu::input::fast_path::{FastPathInput, FastPathInputEvent};
++use ironrdp_pdu::input::fast_path::{FastPathInput, FastPathInputEvent, KeyboardFlags};
++use ironrdp_pdu::input::{InputEvent, InputEventPdu, ScanCodePdu, SyncPdu, UnicodePdu, scan_code, sync, unicode};
+ use ironrdp_pdu::rdp::autodetect::AutoDetectRequest;
+-use ironrdp_pdu::rdp::capability_sets::WindowSupportLevel;
++use ironrdp_pdu::rdp::capability_sets::{InputFlags, WindowSupportLevel};
+ use ironrdp_pdu::rdp::client_info::CompressionType;
+ use ironrdp_pdu::rdp::headers::ShareDataPdu;
+ use ironrdp_pdu::rdp::multitransport::{MultitransportRequestPdu, MultitransportResponsePdu};
+@@ -41,6 +42,7 @@ fn to_bulk_compression_type(compression_type: CompressionType) -> BulkCompressio
+ }
+ 
+ pub struct ActiveStage {
++    input_flags: InputFlags,
+     x224_processor: x224::Processor,
+     fast_path_processor: fast_path::Processor,
+     /// Shared server-to-client compression history across all output transports.
+@@ -56,6 +58,8 @@ pub struct ActiveStage {
+ /// All fields are required; they are typically taken straight from `ironrdp-connector`’s
+ /// `ConnectionResult` once the connection sequence is finalized.
+ pub struct ActiveStageBuilder {
++    /// Input capabilities advertised by the server during activation.
++    pub input_flags: InputFlags,
+     pub static_channels: StaticChannelSet,
+     pub user_channel_id: u16,
+     pub io_channel_id: u16,
+@@ -72,6 +76,7 @@ pub struct ActiveStageBuilder {
+ impl ActiveStageBuilder {
+     pub fn build(self) -> ActiveStage {
+         let Self {
++            input_flags,
+             static_channels,
+             user_channel_id,
+             io_channel_id,
+@@ -100,6 +105,7 @@ impl ActiveStageBuilder {
+         .build();
+ 
+         ActiveStage {
++            input_flags,
+             x224_processor,
+             fast_path_processor,
+             bulk_decompressor: new_bulk_decompressor(compression_type),
+@@ -116,6 +122,11 @@ fn new_bulk_decompressor(compression_type: Option<CompressionType>) -> Option<Bu
+ }
+ 
+ impl ActiveStage {
++    /// Updates the server input capabilities after reactivation.
++    pub fn set_input_flags(&mut self, input_flags: InputFlags) {
++        self.input_flags = input_flags;
++    }
++
+     pub fn update_mouse_pos(&mut self, x: u16, y: u16) {
+         self.fast_path_processor.update_mouse_pos(x, y);
+     }
+@@ -133,7 +144,8 @@ impl ActiveStage {
+     }
+ 
+     /// Encodes outgoing input events and modifies image if necessary (e.g for client-side pointer
+-    /// rendering).
++    /// rendering). Uses fast-path only when advertised by the server; otherwise encodes
++    /// slow-path input on the global channel. QoE timestamps are omitted on slow-path.
+     pub fn process_fastpath_input(
+         &mut self,
+         image: &mut DecodedImage,
+@@ -149,9 +161,64 @@ impl ActiveStage {
+         let mut output = Vec::with_capacity(events.len().div_ceil(FastPathInput::MAX_EVENTS) + 1);
+ 
+         for event_chunk in events.chunks(FastPathInput::MAX_EVENTS) {
+-            // PERF: unnecessary copy
+-            let fastpath_input = FastPathInput::new(event_chunk.to_vec()).map_err(SessionError::decode)?;
+-            let frame = ironrdp_core::encode_vec(&fastpath_input).map_err(SessionError::encode)?;
++            let frame = if self
++                .input_flags
++                .intersects(InputFlags::FASTPATH_INPUT | InputFlags::FASTPATH_INPUT_2)
++            {
++                // PERF: unnecessary copy
++                let fastpath_input = FastPathInput::new(event_chunk.to_vec()).map_err(SessionError::decode)?;
++                ironrdp_core::encode_vec(&fastpath_input).map_err(SessionError::encode)?
++            } else {
++                let events = event_chunk
++                    .iter()
++                    .filter_map(|event| {
++                        Some(match *event {
++                            FastPathInputEvent::KeyboardEvent(flags, code) => {
++                                let mut slow_flags = scan_code::KeyboardFlags::empty();
++                                slow_flags.set(
++                                    scan_code::KeyboardFlags::RELEASE,
++                                    flags.contains(KeyboardFlags::RELEASE),
++                                );
++                                slow_flags.set(
++                                    scan_code::KeyboardFlags::EXTENDED,
++                                    flags.contains(KeyboardFlags::EXTENDED),
++                                );
++                                slow_flags.set(
++                                    scan_code::KeyboardFlags::EXTENDED_1,
++                                    flags.contains(KeyboardFlags::EXTENDED1),
++                                );
++                                InputEvent::ScanCode(ScanCodePdu {
++                                    flags: slow_flags,
++                                    key_code: u16::from(code),
++                                })
++                            }
++                            FastPathInputEvent::UnicodeKeyboardEvent(flags, unicode_code) => {
++                                let mut slow_flags = unicode::KeyboardFlags::empty();
++                                slow_flags.set(unicode::KeyboardFlags::RELEASE, flags.contains(KeyboardFlags::RELEASE));
++                                InputEvent::Unicode(UnicodePdu {
++                                    flags: slow_flags,
++                                    unicode_code,
++                                })
++                            }
++                            FastPathInputEvent::MouseEvent(pdu) => InputEvent::Mouse(pdu),
++                            FastPathInputEvent::MouseEventEx(pdu) => InputEvent::MouseX(pdu),
++                            FastPathInputEvent::MouseEventRel(pdu) => InputEvent::MouseRel(pdu),
++                            FastPathInputEvent::SyncEvent(flags) => InputEvent::Sync(SyncPdu {
++                                flags: sync::SyncToggleFlags::from_bits_retain(u32::from(flags.bits())),
++                            }),
++                            // QoE timestamps have no slow-path input equivalent.
++                            FastPathInputEvent::QoeEvent(_) => return None,
++                        })
++                    })
++                    .collect::<Vec<_>>();
++                if events.is_empty() {
++                    continue;
++                }
++                let mut frame = WriteBuf::new();
++                self.x224_processor
++                    .encode_static(&mut frame, ShareDataPdu::Input(InputEventPdu(events)))?;
++                frame.into_inner()
++            };
+             output.push(ActiveStageOutput::ResponseFrame(frame));
+         }
+ 
+@@ -1056,6 +1123,7 @@ mod tests {
+     #[test]
+     fn full_redraw_prefers_suppress_output_toggle_when_supported() {
+         let stage = ActiveStageBuilder {
++            input_flags: InputFlags::FASTPATH_INPUT,
+             static_channels: StaticChannelSet::new(),
+             user_channel_id: 1001,
+             io_channel_id: 1003,
+@@ -1078,6 +1146,7 @@ mod tests {
+     #[test]
+     fn multitransport_response_encoder_is_exposed_through_active_stage() {
+         let stage = ActiveStageBuilder {
++            input_flags: InputFlags::FASTPATH_INPUT,
+             static_channels: StaticChannelSet::new(),
+             user_channel_id: 1001,
+             io_channel_id: 1003,
+@@ -1104,6 +1173,7 @@ mod tests {
+     #[test]
+     fn fastpath_input_splits_at_event_limit() {
+         let mut stage = ActiveStageBuilder {
++            input_flags: InputFlags::FASTPATH_INPUT,
+             static_channels: StaticChannelSet::new(),
+             user_channel_id: 1001,
+             io_channel_id: 1003,
+@@ -1149,6 +1219,7 @@ mod tests {
+     #[test]
+     fn fastpath_input_renders_the_last_mouse_position_in_a_batch() {
+         let mut stage = ActiveStageBuilder {
++            input_flags: InputFlags::FASTPATH_INPUT,
+             static_channels: StaticChannelSet::new(),
+             user_channel_id: 1001,
+             io_channel_id: 1003,
+@@ -1527,6 +1598,7 @@ mod tests {
+         );
+ 
+         ActiveStageBuilder {
++            input_flags: InputFlags::FASTPATH_INPUT,
+             static_channels,
+             user_channel_id: 1001,
+             io_channel_id: 1003,
+diff --git a/crates/ironrdp-session/src/fast_path.rs b/crates/ironrdp-session/src/fast_path.rs
+index 93b51181..2874a0fe 100644
+--- a/crates/ironrdp-session/src/fast_path.rs
++++ b/crates/ironrdp-session/src/fast_path.rs
+@@ -402,7 +402,11 @@ impl Processor {
+                         // RDP6 bitmap streams are bottom-up, so reverse them while decoding to
+                         // keep the framebuffer top-down. This matches FreeRDP's GDI frontend,
+                         // which passes `vFlip = TRUE` to its planar bitmap decoder.
+-                        Ok(()) => apply_bitmap(image.apply_rgb24(&buf, &update_rectangle, update.width, true))?,
++                        Ok(()) => {
++                            let rows =
++                                visible_bitmap_rows(&buf, update.width, update.height, update_rectangle.height(), 3);
++                            apply_bitmap(image.apply_rgb24(rows, &update_rectangle, update.width, true))?
++                        }
+                         Err(err) => {
+                             warn!("Invalid RDP6_BITMAP_STREAM: {err}");
+                             None
+@@ -414,24 +418,32 @@ impl Processor {
+                     // 2.2.9.1.1.3.1.2.4).
+                     debug!(bpp = update.bits_per_pixel, "Non-32 bpp compressed RLE_BITMAP_STREAM",);
+ 
+-                    match ironrdp_graphics::rle::decompress(
++                    let decoded = ironrdp_graphics::rle::decompress(
+                         update.bitmap_data,
+                         &mut buf,
+                         usize::from(update.width),
+                         usize::from(update.height),
+                         usize::from(update.bits_per_pixel),
+-                    ) {
++                    );
++                    let rows = visible_bitmap_rows(
++                        &buf,
++                        update.width,
++                        update.height,
++                        update_rectangle.height(),
++                        usize::from(update.bits_per_pixel).div_ceil(8),
++                    );
++                    match decoded {
+                         Ok(RlePixelFormat::Rgb16) => {
+-                            apply_bitmap(image.apply_rgb16_bitmap(&buf, &update_rectangle, update.width))?
++                            apply_bitmap(image.apply_rgb16_bitmap(rows, &update_rectangle, update.width))?
+                         }
+                         Ok(RlePixelFormat::Rgb15) => {
+-                            apply_bitmap(image.apply_rgb15_bitmap(&buf, &update_rectangle, update.width))?
++                            apply_bitmap(image.apply_rgb15_bitmap(rows, &update_rectangle, update.width))?
+                         }
+                         Ok(RlePixelFormat::Rgb24) => {
+-                            apply_bitmap(image.apply_bgr24_bitmap(&buf, &update_rectangle, update.width))?
++                            apply_bitmap(image.apply_bgr24_bitmap(rows, &update_rectangle, update.width))?
+                         }
+                         Ok(RlePixelFormat::Rgb8) => apply_bitmap(image.apply_rgb8_with_palette(
+-                            &buf,
++                            rows,
+                             &update_rectangle,
+                             self.palette.colors(),
+                             update.width,
+@@ -468,18 +480,25 @@ impl Processor {
+                         buf.extend_from_slice(&row[..row_bytes]);
+                     }
+ 
++                    let rows = visible_bitmap_rows(
++                        &buf,
++                        update.width,
++                        update.height,
++                        update_rectangle.height(),
++                        bytes_per_pixel,
++                    );
+                     match update.bits_per_pixel {
+                         8 => apply_bitmap(image.apply_rgb8_with_palette(
+-                            &buf,
++                            rows,
+                             &update_rectangle,
+                             self.palette.colors(),
+                             update.width,
+                         ))?,
+-                        15 => apply_bitmap(image.apply_rgb15_bitmap(&buf, &update_rectangle, update.width))?,
+-                        16 => apply_bitmap(image.apply_rgb16_bitmap(&buf, &update_rectangle, update.width))?,
+-                        24 => apply_bitmap(image.apply_bgr24_bitmap(&buf, &update_rectangle, update.width))?,
++                        15 => apply_bitmap(image.apply_rgb15_bitmap(rows, &update_rectangle, update.width))?,
++                        16 => apply_bitmap(image.apply_rgb16_bitmap(rows, &update_rectangle, update.width))?,
++                        24 => apply_bitmap(image.apply_bgr24_bitmap(rows, &update_rectangle, update.width))?,
+                         32 => apply_bitmap(image.apply_rgb32_bitmap(
+-                            &buf,
++                            rows,
+                             PixelFormat::BgrX32,
+                             &update_rectangle,
+                             update.width,
+@@ -490,24 +509,25 @@ impl Processor {
+                         }
+                     }
+                 } else {
++                    let rows = visible_bitmap_rows(
++                        update.bitmap_data,
++                        update.width,
++                        update.height,
++                        update_rectangle.height(),
++                        bytes_per_pixel,
++                    );
+                     match update.bits_per_pixel {
+                         8 => apply_bitmap(image.apply_rgb8_with_palette(
+-                            update.bitmap_data,
++                            rows,
+                             &update_rectangle,
+                             self.palette.colors(),
+                             update.width,
+                         ))?,
+-                        15 => {
+-                            apply_bitmap(image.apply_rgb15_bitmap(update.bitmap_data, &update_rectangle, update.width))?
+-                        }
+-                        16 => {
+-                            apply_bitmap(image.apply_rgb16_bitmap(update.bitmap_data, &update_rectangle, update.width))?
+-                        }
+-                        24 => {
+-                            apply_bitmap(image.apply_bgr24_bitmap(update.bitmap_data, &update_rectangle, update.width))?
+-                        }
++                        15 => apply_bitmap(image.apply_rgb15_bitmap(rows, &update_rectangle, update.width))?,
++                        16 => apply_bitmap(image.apply_rgb16_bitmap(rows, &update_rectangle, update.width))?,
++                        24 => apply_bitmap(image.apply_bgr24_bitmap(rows, &update_rectangle, update.width))?,
+                         32 => apply_bitmap(image.apply_rgb32_bitmap(
+-                            update.bitmap_data,
++                            rows,
+                             PixelFormat::BgrX32,
+                             &update_rectangle,
+                             update.width,
+@@ -530,7 +550,27 @@ impl Processor {
+             }
+         }
+ 
+-        Ok(vec![update_kind])
++        return Ok(vec![update_kind]);
++
++        fn visible_bitmap_rows(
++            data: &[u8],
++            width: u16,
++            height: u16,
++            visible_height: u16,
++            bytes_per_pixel: usize,
++        ) -> &[u8] {
++            let stride = usize::from(width) * bytes_per_pixel;
++            let Some(expected_length) = stride.checked_mul(usize::from(height)) else {
++                return &[];
++            };
++            if data.len() != expected_length {
++                // Preserve the apply methods' invalid-source-length recovery path.
++                return &[];
++            }
++            // Bottom-up data ends with the visual top row. Discard visual bottom
++            // rows (including height padding), keeping the full source stride.
++            &data[usize::from(height - visible_height) * stride..]
++        }
+     }
+ 
+     /// Process a pointer update, shared between fast-path and slow-path pipelines.
+diff --git a/crates/ironrdp-session/src/image.rs b/crates/ironrdp-session/src/image.rs
+index fb19afbe..67c6c086 100644
+--- a/crates/ironrdp-session/src/image.rs
++++ b/crates/ironrdp-session/src/image.rs
+@@ -275,8 +275,24 @@ impl DecodedImage {
+         width: u16,
+         height: u16,
+     ) -> Option<InclusiveRectangle> {
+-        (self.rect_fits(update_rectangle) && width >= update_rectangle.width() && update_rectangle.height() == height)
+-            .then_some(update_rectangle.clone())
++        // Validate the declared destination before clipping: clipping must not hide
++        // insufficient source dimensions or an inverted rectangle.
++        if update_rectangle.left > update_rectangle.right
++            || update_rectangle.top > update_rectangle.bottom
++            || update_rectangle.left >= self.width
++            || update_rectangle.top >= self.height
++            || u32::from(width) < u32::from(update_rectangle.right) - u32::from(update_rectangle.left) + 1
++            || u32::from(height) < u32::from(update_rectangle.bottom) - u32::from(update_rectangle.top) + 1
++        {
++            return None;
++        }
++
++        Some(InclusiveRectangle {
++            left: update_rectangle.left,
++            top: update_rectangle.top,
++            right: update_rectangle.right.min(self.width - 1),
++            bottom: update_rectangle.bottom.min(self.height - 1),
++        })
+     }
+ 
+     fn apply_pointer_layer(&mut self, layer: PointerLayer) -> SessionResult<Option<InclusiveRectangle>> {
+diff --git a/crates/ironrdp-testsuite-core/tests/session/active_stage.rs b/crates/ironrdp-testsuite-core/tests/session/active_stage.rs
+index bbf84400..66cadd1c 100644
+--- a/crates/ironrdp-testsuite-core/tests/session/active_stage.rs
++++ b/crates/ironrdp-testsuite-core/tests/session/active_stage.rs
+@@ -307,6 +307,7 @@ fn active_stage_with_active_egfx() -> ActiveStage {
+     );
+ 
+     ActiveStageBuilder {
++        input_flags: ironrdp_pdu::rdp::capability_sets::InputFlags::empty(),
+         static_channels,
+         user_channel_id: USER_CHANNEL_ID,
+         io_channel_id: IO_CHANNEL_ID,
+@@ -427,3 +428,97 @@ fn egfx_reset_resizes_the_image_before_compositing_the_same_payload() {
+         "the filled pixel must be present at its new-output coordinates"
+     );
+ }
++
++#[test]
++fn input_transport_follows_activation_flags() {
++    use ironrdp_core::decode;
++    use ironrdp_pdu::input::fast_path::{FastPathInput, FastPathInputEvent, KeyboardFlags, SynchronizeFlags};
++    use ironrdp_pdu::input::{InputEvent, MousePdu, MouseXPdu, mouse, mouse_x};
++    use ironrdp_pdu::mcs::SendDataRequest;
++    use ironrdp_pdu::rdp::capability_sets::InputFlags;
++    use ironrdp_pdu::rdp::headers::{ShareControlHeader, ShareControlPdu, ShareDataPdu};
++
++    let mut stage = ActiveStageBuilder {
++        input_flags: InputFlags::empty(),
++        static_channels: StaticChannelSet::new(),
++        user_channel_id: 1001,
++        io_channel_id: 1003,
++        message_channel_id: None,
++        share_id: 1,
++        compression_type: None,
++        enable_server_pointer: false,
++        pointer_software_rendering: false,
++    }
++    .build();
++    let mut image = DecodedImage::new(PixelFormat::RgbA32, 1, 1);
++    let events = [
++        FastPathInputEvent::KeyboardEvent(KeyboardFlags::empty(), 0x1e),
++        FastPathInputEvent::KeyboardEvent(
++            KeyboardFlags::RELEASE | KeyboardFlags::EXTENDED | KeyboardFlags::EXTENDED1,
++            0x1d,
++        ),
++        FastPathInputEvent::UnicodeKeyboardEvent(KeyboardFlags::RELEASE, 0x20ac),
++        FastPathInputEvent::MouseEvent(MousePdu {
++            flags: mouse::PointerFlags::MOVE,
++            number_of_wheel_rotation_units: 0,
++            x_position: 42,
++            y_position: 24,
++        }),
++        FastPathInputEvent::MouseEventEx(MouseXPdu {
++            flags: mouse_x::PointerXFlags::empty(),
++            x_position: 12,
++            y_position: 34,
++        }),
++        FastPathInputEvent::SyncEvent(SynchronizeFlags::CAPS_LOCK | SynchronizeFlags::NUM_LOCK),
++    ];
++    // Switch both ways to cover capability changes during reactivation, including INPUT2 alone.
++    for flags in [
++        InputFlags::empty(),
++        InputFlags::FASTPATH_INPUT,
++        InputFlags::FASTPATH_INPUT_2,
++        InputFlags::SCANCODES,
++    ] {
++        stage.set_input_flags(flags);
++        let output = stage.process_fastpath_input(&mut image, &events).unwrap();
++        let [ActiveStageOutput::ResponseFrame(frame)] = output.as_slice() else {
++            panic!("expected one input frame")
++        };
++        if flags.intersects(InputFlags::FASTPATH_INPUT | InputFlags::FASTPATH_INPUT_2) {
++            let pdu: FastPathInput = decode(frame).unwrap();
++            assert_eq!(pdu.input_events(), events);
++        } else {
++            let request: X224<SendDataRequest<'_>> = decode(frame).unwrap();
++            assert_eq!(request.0.initiator_id, 1001);
++            assert_eq!(request.0.channel_id, 1003);
++            let header: ShareControlHeader = decode(&request.0.user_data).unwrap();
++            assert_eq!(header.share_id, 1);
++            let ShareControlPdu::Data(data) = header.share_control_pdu else {
++                panic!("expected share data")
++            };
++            let ShareDataPdu::Input(input) = data.share_data_pdu else {
++                panic!("expected input")
++            };
++            assert_eq!(input.0.len(), events.len());
++            assert!(matches!(&input.0[0], InputEvent::ScanCode(pdu) if pdu.flags.bits() == 0 && pdu.key_code == 0x1e));
++            assert!(
++                matches!(&input.0[1], InputEvent::ScanCode(pdu) if pdu.flags.bits() == 0x8300 && pdu.key_code == 0x1d)
++            );
++            assert!(
++                matches!(&input.0[2], InputEvent::Unicode(pdu) if pdu.flags.bits() == 0x8000 && pdu.unicode_code == 0x20ac)
++            );
++            assert!(matches!(&input.0[3], InputEvent::Mouse(pdu) if pdu.x_position == 42 && pdu.y_position == 24));
++            assert!(matches!(&input.0[4], InputEvent::MouseX(pdu) if pdu.x_position == 12 && pdu.y_position == 34));
++            assert!(matches!(&input.0[5], InputEvent::Sync(pdu) if pdu.flags.bits() == 6));
++        }
++    }
++    stage.set_input_flags(InputFlags::empty());
++    assert!(stage.process_fastpath_input(&mut image, &[]).unwrap().is_empty());
++    assert!(
++        stage
++            .process_fastpath_input(&mut image, &[FastPathInputEvent::QoeEvent(123)])
++            .unwrap()
++            .is_empty()
++    );
++    let output = stage.process_fastpath_input(&mut image, &vec![events[0]; 256]).unwrap();
++    assert_eq!(output.len(), 2);
++}
+diff --git a/crates/ironrdp-testsuite-core/tests/session/fast_path.rs b/crates/ironrdp-testsuite-core/tests/session/fast_path.rs
+index a13b81e7..f830bdf5 100644
+--- a/crates/ironrdp-testsuite-core/tests/session/fast_path.rs
++++ b/crates/ironrdp-testsuite-core/tests/session/fast_path.rs
+@@ -216,3 +216,110 @@ fn fragmented_compressed_fastpath_update_decompresses_before_reassembly() {
+     );
+     assert_eq!(image.data(), expected.data());
+ }
++
++#[test]
++fn bitmap_updates_clip_destination_and_source_height_without_flipping_visible_rows() {
++    // Normal destination, bottom/right clipping, extra source height, and both.
++    for (right, bottom, height) in [(2, 2, 2), (3, 3, 3), (2, 2, 4), (3, 3, 4)] {
++        for (bits_per_pixel, compressed) in [(24, false), (32, false), (24, true)] {
++            let mut pixels = Vec::new();
++            for y in (0..height).rev() {
++                for x in 0..3u8 {
++                    pixels.extend_from_slice(&[x, y, 10 + y * 3 + x]);
++                    if bits_per_pixel == 32 {
++                        pixels.push(255);
++                    }
++                }
++                if bits_per_pixel == 24 && !compressed {
++                    // Three pixels occupy nine bytes, padded to twelve on the wire.
++                    pixels.extend_from_slice(&[0; 3]);
++                }
++            }
++            if compressed {
++                // Interleaved RLE REGULAR_COLOR_IMAGE: literal bottom-up pixels.
++                pixels.insert(0, 0x80 | (3 * height));
++            }
++            let mut image = DecodedImage::new(PixelFormat::RgbA32, 3, 3);
++            let updates = processor()
++                .process_bitmap_update(
++                    &mut image,
++                    BitmapUpdateData {
++                        rectangles: vec![BitmapData {
++                            rectangle: InclusiveRectangle {
++                                left: 1,
++                                top: 1,
++                                right,
++                                bottom,
++                            },
++                            width: 3,
++                            height: u16::from(height),
++                            bits_per_pixel,
++                            compression_flags: if compressed {
++                                Compression::BITMAP_COMPRESSION
++                            } else {
++                                Compression::empty()
++                            },
++                            compressed_data_header: None,
++                            bitmap_data: &pixels,
++                        }],
++                    },
++                )
++                .expect("apply clipped bitmap");
++            assert!(matches!(
++                updates.as_slice(),
++                [ironrdp_session::fast_path::UpdateKind::Region(InclusiveRectangle {
++                    left: 1,
++                    top: 1,
++                    right: 2,
++                    bottom: 2,
++                })]
++            ));
++            let mut expected = vec![0; 3 * 3 * 4];
++            expected[16..24].copy_from_slice(&[10, 0, 0, 255, 11, 0, 1, 255]);
++            expected[28..36].copy_from_slice(&[13, 1, 0, 255, 14, 1, 1, 255]);
++            assert_eq!(
++                image.data(),
++                expected,
++                "destination ({right}, {bottom}), height {height}, depth {bits_per_pixel}, compressed {compressed}"
++            );
++        }
++    }
++}
++
++#[test]
++fn bitmap_updates_reject_outside_destinations_and_insufficient_sources() {
++    for (left, top, right, bottom, width, height) in [
++        (3, 0, 4, 1, 2, 2), // wholly beyond the right edge
++        (0, 3, 1, 4, 2, 2), // wholly below the bottom edge
++        (1, 1, 3, 2, 2, 2), // insufficient width before clipping
++        (1, 1, 2, 3, 2, 2), // insufficient height before clipping
++    ] {
++        let mut image = DecodedImage::new(PixelFormat::RgbA32, 3, 3);
++        let updates = processor()
++            .process_bitmap_update(
++                &mut image,
++                BitmapUpdateData {
++                    rectangles: vec![BitmapData {
++                        rectangle: InclusiveRectangle {
++                            left,
++                            top,
++                            right,
++                            bottom,
++                        },
++                        width,
++                        height,
++                        bits_per_pixel: 32,
++                        compression_flags: Compression::empty(),
++                        compressed_data_header: None,
++                        bitmap_data: &[255; 16],
++                    }],
++                },
++            )
++            .expect("ignore invalid bitmap destination");
++        assert!(matches!(
++            updates.as_slice(),
++            [ironrdp_session::fast_path::UpdateKind::None]
++        ));
++        assert_eq!(image.data(), &[0; 36]);
++    }
++}
+diff --git a/crates/ironrdp-testsuite-core/tests/svc.rs b/crates/ironrdp-testsuite-core/tests/svc.rs
+index d7ce9517..158b14e0 100644
+--- a/crates/ironrdp-testsuite-core/tests/svc.rs
++++ b/crates/ironrdp-testsuite-core/tests/svc.rs
+@@ -278,6 +278,7 @@ fn reactivated_session_applies_the_static_channel_chunk_size() {
+     channels.attach_channel_id_by_key(key, 1005);
+ 
+     let mut active_stage = ActiveStageBuilder {
++        input_flags: ironrdp_pdu::rdp::capability_sets::InputFlags::empty(),
+         static_channels: channels,
+         user_channel_id: 1002,
+         io_channel_id: 1003,
+diff --git a/crates/ironrdp-testsuite-extra/tests/e2e.rs b/crates/ironrdp-testsuite-extra/tests/e2e.rs
+index 8e2d7055..171beb9e 100644
+--- a/crates/ironrdp-testsuite-extra/tests/e2e.rs
++++ b/crates/ironrdp-testsuite-extra/tests/e2e.rs
+@@ -163,6 +163,7 @@ async fn test_deactivation_reactivation() {
+ #[test]
+ fn test_reactivation_preserves_bulk_decompression_history() {
+     let mut stage = ActiveStageBuilder {
++        input_flags: ironrdp_pdu::rdp::capability_sets::InputFlags::empty(),
+         static_channels: StaticChannelSet::new(),
+         user_channel_id: 1001,
+         io_channel_id: 1003,
+@@ -986,6 +987,7 @@ async fn client_server_with_connector<F, Fut, C>(
+                 // Deactivation-Reactivation Sequence.
+                 let activation_factory = connection_result.activation_factory;
+                 let active_stage = ActiveStageBuilder {
++                    input_flags: connection_result.input_flags,
+                     static_channels: connection_result.static_channels,
+                     user_channel_id: connection_result.user_channel_id,
+                     io_channel_id: connection_result.io_channel_id,
+diff --git a/crates/ironrdp-web/src/session.rs b/crates/ironrdp-web/src/session.rs
+index 4a6ed6b5..a5032d51 100644
+--- a/crates/ironrdp-web/src/session.rs
++++ b/crates/ironrdp-web/src/session.rs
+@@ -709,6 +709,7 @@ impl iron_remote_desktop::Session for Session {
+         let activation_factory = connection_result.activation_factory;
+ 
+         let mut active_stage = ActiveStageBuilder {
++            input_flags: connection_result.input_flags,
+             static_channels: connection_result.static_channels,
+             user_channel_id: connection_result.user_channel_id,
+             io_channel_id: connection_result.io_channel_id,
+@@ -1099,7 +1100,7 @@ impl iron_remote_desktop::Session for Session {
+                             if let ConnectionActivationState::Finalized {
+                                 desktop_size,
+                                 share_id,
+-                                input_flags: _,
++                                input_flags,
+                                 enable_server_pointer,
+                                 pointer_software_rendering,
+                                 static_channel_chunk_size,
+@@ -1129,6 +1130,7 @@ impl iron_remote_desktop::Session for Session {
+                                 ) {
+                                     return Err(IronError::from(anyhow::anyhow!("invalid static channel chunk size")));
+                                 }
++                                active_stage.set_input_flags(input_flags);
+                                 active_stage.set_window_support_level(window_support_level);
+                                 break 'activation_seq;
+                             }
+@@ -1193,18 +1195,8 @@ impl iron_remote_desktop::Session for Session {
+         caps_lock: bool,
+         kana_lock: bool,
+     ) -> Result<(), Self::Error> {
+-        use ironrdp::pdu::input::fast_path::FastPathInput;
+-
+         let event = ironrdp::input::synchronize_event(scroll_lock, num_lock, caps_lock, kana_lock);
+-        let fastpath_input = FastPathInput::single(event);
+-
+-        let frame = ironrdp::core::encode_vec(&fastpath_input).context("FastPathInput encoding")?;
+-
+-        self.writer_tx
+-            .unbounded_send(frame)
+-            .context("Send frame to writer task")?;
+-
+-        Ok(())
++        self.h_send_inputs(smallvec::smallvec![event])
+     }
+ 
+     fn shutdown(&self) -> Result<(), Self::Error> {
+diff --git a/crates/ironrdp/examples/rdp_stress.rs b/crates/ironrdp/examples/rdp_stress.rs
+index ee45471b..d9962f47 100644
+--- a/crates/ironrdp/examples/rdp_stress.rs
++++ b/crates/ironrdp/examples/rdp_stress.rs
+@@ -322,6 +322,7 @@ fn run(config: Config) -> anyhow::Result<u32> {
+     };
+ 
+     let mut stage = ActiveStageBuilder {
++        input_flags: connection_result.input_flags,
+         static_channels: connection_result.static_channels,
+         user_channel_id: connection_result.user_channel_id,
+         io_channel_id: connection_result.io_channel_id,
+diff --git a/crates/ironrdp/examples/screenshot.rs b/crates/ironrdp/examples/screenshot.rs
+index 7073cc61..405965cd 100644
+--- a/crates/ironrdp/examples/screenshot.rs
++++ b/crates/ironrdp/examples/screenshot.rs
+@@ -352,6 +352,7 @@ fn active_stage(
+     image: &mut DecodedImage,
+ ) -> anyhow::Result<()> {
+     let mut active_stage = ActiveStageBuilder {
++        input_flags: connection_result.input_flags,
+         static_channels: connection_result.static_channels,
+         user_channel_id: connection_result.user_channel_id,
+         io_channel_id: connection_result.io_channel_id,
