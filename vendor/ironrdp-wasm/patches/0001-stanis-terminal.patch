@@ -68,10 +68,57 @@ index a67d49c9..4c82dc2a 100644
              user_channel_id: 1001,
              io_channel_id: 1003,
 diff --git a/crates/ironrdp-connector/src/connection.rs b/crates/ironrdp-connector/src/connection.rs
-index 9f0ddf3f..4da1550d 100644
+index 9f0ddf3f..17565eb7 100644
 --- a/crates/ironrdp-connector/src/connection.rs
 +++ b/crates/ironrdp-connector/src/connection.rs
-@@ -1829,12 +1829,10 @@ fn create_client_info_pdu(
+@@ -1457,7 +1457,45 @@ impl Sequence for ClientConnector {
+             } => {
+                 let ctx = mcs::decode_send_data_indication(input).map_err(ConnectorError::decode)?;
+ 
+-                if Some(ctx.channel_id) == message_channel_id {
++                if let (Some(channel_id), Ok(autodetect)) = (
++                    message_channel_id.filter(|id| *id == ctx.channel_id),
++                    decode::<rdp::autodetect::AutoDetectReqPdu>(ctx.user_data),
++                ) {
++                    // Windows RD Session Hosts / Connection Brokers may run auto-detection (e.g. an
++                    // RTT request) after licensing, on the same message channel as multitransport
++                    // requests. Answer it and keep waiting, as in the connect-time phase.
++                    let written = self.respond_to_connect_time_autodetect(
++                        autodetect.request,
++                        None,
++                        channel_id,
++                        user_channel_id,
++                        output,
++                    )?;
++                    (
++                        written,
++                        ClientConnectorState::MultitransportBootstrapping {
++                            io_channel_id,
++                            user_channel_id,
++                            message_channel_id,
++                            requests_seen,
++                        },
++                    )
++                } else if Some(ctx.channel_id) == message_channel_id
++                    && decode::<rdp::multitransport::MultitransportRequestPdu>(ctx.user_data).is_err()
++                {
++                    // Some other message-channel PDU we do not act on in this phase: ignore it
++                    // instead of aborting the whole connection.
++                    warn!(len = ctx.user_data.len(), "Ignoring unexpected message-channel PDU before Demand Active");
++                    (
++                        Written::Nothing,
++                        ClientConnectorState::MultitransportBootstrapping {
++                            io_channel_id,
++                            user_channel_id,
++                            message_channel_id,
++                            requests_seen,
++                        },
++                    )
++                } else if Some(ctx.channel_id) == message_channel_id {
+                     let pdu = decode::<rdp::multitransport::MultitransportRequestPdu>(ctx.user_data)
+                         .map_err(ConnectorError::decode)?;
+ 
+@@ -1829,12 +1867,10 @@ fn create_client_info_pdu(
          CompressionType::K8 // ignored if ClientInfoFlags::COMPRESSION is not set
      };
  
@@ -88,7 +135,7 @@ index 9f0ddf3f..4da1550d 100644
  
      let client_info = ClientInfo {
          credentials: Credentials {
-@@ -1939,8 +1937,7 @@ mod tests {
+@@ -1939,8 +1975,7 @@ mod tests {
          let client_info = create_client_info_pdu(&config, &"127.0.0.1:3389".parse().unwrap(), None).client_info;
  
          assert!(client_info.flags.contains(ClientInfoFlags::RAIL));
@@ -131,10 +178,10 @@ index 9a7dabdc..d9332eb0 100644
  use core::fmt;
 diff --git a/crates/ironrdp-connector/src/server_redirection.rs b/crates/ironrdp-connector/src/server_redirection.rs
 new file mode 100644
-index 00000000..47f5ddf3
+index 00000000..45dd9a8a
 --- /dev/null
 +++ b/crates/ironrdp-connector/src/server_redirection.rs
-@@ -0,0 +1,256 @@
+@@ -0,0 +1,266 @@
 +//! Server Redirection PDU ([MS-RDPBCGR] 2.2.13), sent by an RD Connection Broker in place of the
 +//! Server Demand Active PDU to send the client to the session host that should serve it.
 +//!
@@ -381,6 +428,16 @@ index 00000000..47f5ddf3
 +        assert_eq!(parse_server_redirection(&pdu).unwrap().target_host(false), Some("rdsh01.empresa.local"));
 +        let pdu = packet(LB_TARGET_NET_ADDRESS, &[unicode("10.0.0.21")]);
 +        assert_eq!(parse_server_redirection(&pdu).unwrap().target_host(false), Some("10.0.0.21"));
++    }
++
++    #[test]
++    fn ten_byte_rtt_request_is_auto_detect_not_multitransport() {
++        // Basic security header (flags = SEC_AUTODETECT_REQ, flagsHi = 0) + RTT Measure Request
++        // (headerLength 6, headerTypeId 0, sequenceNumber 1, requestType 0x1001): the 10-byte PDU a
++        // Windows server sent on the message channel after licensing.
++        let pdu = [0x00, 0x10, 0x00, 0x00, 0x06, 0x00, 0x01, 0x00, 0x01, 0x10];
++        assert!(ironrdp_core::decode::<ironrdp_pdu::rdp::autodetect::AutoDetectReqPdu>(&pdu).is_ok());
++        assert!(ironrdp_core::decode::<ironrdp_pdu::rdp::multitransport::MultitransportRequestPdu>(&pdu).is_err());
 +    }
 +
 +    #[test]
