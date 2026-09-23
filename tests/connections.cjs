@@ -49,6 +49,7 @@ function sftpServer(sftp) {
 (async () => {
   let app, ssh, telnet, echo, vnc, ftp, vncSocket;
   const vncClipboardReceived = [];
+  const vncEvents = []; // ordem de chegada: 'cut:<texto>' e 'key:<keysym>:<down>'
   try {
     echo = net.createServer(socket => { track(socket); socket.pipe(socket); }); const echoPort = await listen(echo);
     const key = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs1', format: 'pem' });
@@ -95,7 +96,8 @@ function sftpServer(sftp) {
               const pixels = Buffer.alloc(64 * 64 * 4); for (let i = 0; i < pixels.length; i += 4) { pixels[i] = 80; pixels[i + 1] = 160; pixels[i + 2] = 40; }
               socket.write(Buffer.concat([header, pixels]));
             }
-            if (type === 6) vncClipboardReceived.push(message.subarray(8).toString('latin1'));
+            if (type === 6) { vncClipboardReceived.push(message.subarray(8).toString('latin1')); vncEvents.push('cut:' + message.subarray(8).toString('latin1')); }
+            if (type === 4) vncEvents.push(`key:${message.readUInt32BE(4).toString(16)}:${message[1]}`);
           }
         }
       });
@@ -195,6 +197,28 @@ function sftpServer(sftp) {
     await new Promise(resolve => setTimeout(resolve, 500));
     assert.ok(vncClipboardReceived.includes('Colado direto na tela VNC'), `Evento paste não chegou ao servidor. Recebido: ${JSON.stringify(vncClipboardReceived)}`);
     console.log('PASS: colar direto na tela VNC (evento paste) também manda o texto para o servidor.');
+    // Ctrl+V comum: o texto copiado no Windows chega ao servidor ANTES do "v" (senão o servidor colaria o
+    // clipboard antigo dele).
+    vncEvents.length = 0;
+    await app.evaluate(({ clipboard }) => clipboard.writeText('Copiado agora no Windows'));
+    await page.locator('.graphic-mount canvas').click(); await page.keyboard.press('Control+V');
+    await new Promise(resolve => setTimeout(resolve, 800));
+    const cutAt = vncEvents.indexOf('cut:Copiado agora no Windows'), vAt = vncEvents.indexOf('key:76:1');
+    assert.ok(cutAt >= 0 && vAt > cutAt, `Ctrl+V deveria mandar o texto e depois o "v". Recebido: ${JSON.stringify(vncEvents)}`);
+    assert.equal(vncEvents.filter(e => e === 'key:76:1').length, 1, `o "v" deveria ir uma vez só. Recebido: ${JSON.stringify(vncEvents)}`);
+    console.log('PASS: Ctrl+V na tela VNC manda o texto copiado no Windows antes das teclas de colar.');
+    // Sincronização automática: copiar no Windows com a aba VNC ativa chega ao servidor sem apertar nada.
+    vncEvents.length = 0;
+    await app.evaluate(({ clipboard }) => clipboard.writeText('Sincronizado sozinho'));
+    await page.waitForFunction(() => true); await new Promise(resolve => setTimeout(resolve, 2500));
+    assert.ok(vncEvents.includes('cut:Sincronizado sozinho'), `a sincronização automática não mandou o texto. Recebido: ${JSON.stringify(vncEvents)}`);
+    console.log('PASS: o que é copiado no Windows vai sozinho para o servidor VNC com a aba ativa.');
+    // Botão Arquivos da barra VNC: abre o painel e inicia o canal de arquivos do host (pergunta o sistema).
+    await page.locator('.graphic-toolbar button', { hasText: 'Arquivos' }).click({ force: true });
+    await page.locator('#dialog-title', { hasText: 'Sistema do host' }).waitFor({ timeout: 5000 });
+    assert.equal(await page.locator('#file-panel').isHidden(), false, 'o painel Arquivos deveria abrir');
+    await page.click('#dialog-cancel');
+    console.log('PASS: botão Arquivos da barra VNC abre o painel e o canal de arquivos do host.');
     // RDP agora roda em WASM (canvas) no renderer, conectado via um proxy WebSocket local (rdpproxy.cjs)
     // que este processo principal sobe sob demanda — sem controle ActiveX nem janela nativa nenhuma.
     // O handshake TLS completo já é validado à parte em tests/rdpproxy-handshake.test.cjs (com um

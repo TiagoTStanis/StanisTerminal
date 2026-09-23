@@ -165,7 +165,6 @@ async function openSession(profile) {
     // Intercepta colagem nativa para evitar executar várias linhas sem revisão.
     mount.addEventListener('paste', event => { event.preventDefault(); event.stopPropagation(); safe(() => paste(item, event.clipboardData.getData('text/plain')))(); }, true);
     await call('terminal:activate', item.id);
-    if (profile.type === 'local' && state.config.settings.coloredPrompt !== false) safe(async () => { const promptCommand = await coloredPromptCommand(profile.shell); if (promptCommand) await call('terminal:write', item.id, promptCommand); })();
   } else {
     item.mount = elem('div', '', 'graphic-mount'); item.pane.append(item.mount);
     if (profile.type === 'vnc') {
@@ -180,7 +179,7 @@ async function openSession(profile) {
       }));
       item.rfb.addEventListener('connect', () => toast('VNC conectado.'));
       item.rfb.addEventListener('disconnect', event => {
-        item.ended = true;
+        item.ended = true; clearInterval(item.clipboardTimer);
         let message = event.detail.clean ? 'VNC desconectado.' : 'Conexão VNC interrompida.';
         if (!event.detail.clean && lastRfbFailureDetail) {
           if (/Unsupported security types/i.test(lastRfbFailureDetail)) message = 'Este servidor VNC exige um tipo de autenticação que o app não suporta ainda. Detalhe técnico: ' + lastRfbFailureDetail;
@@ -189,16 +188,52 @@ async function openSession(profile) {
         toast(message); lastRfbFailureDetail = ''; renderTabs();
       });
       item.rfb.addEventListener('securityfailure', event => toast(event.detail.reason || 'Autenticação VNC falhou.'));
-      item.rfb.addEventListener('clipboard', event => safe(() => call('clipboard:write', event.detail.text))());
-      const sendClipboard = () => safe(async () => { const text = await call('clipboard:read'); if (text) item.rfb.clipboardPasteFrom(text); })();
+      // Clipboard nos dois sentidos, como os visualizadores VNC tradicionais: o que o servidor copia vem
+      // para o Windows, e o que você copia no Windows vai para o servidor sozinho (a cada segundo, só com
+      // esta aba ativa e a janela em foco, e só quando o texto muda). lastText evita devolver ao servidor
+      // o próprio texto que ele acabou de mandar.
+      // writing: enquanto o texto do servidor ainda está sendo gravado no Windows, não lê o clipboard (leria
+      // o texto antigo e o mandaria de volta, sobrescrevendo o que o servidor acabou de copiar).
+      let lastText = null, writing = 0;
+      item.rfb.addEventListener('clipboard', event => {
+        lastText = event.detail.text; writing++;
+        safe(async () => { try { await call('clipboard:write', event.detail.text); } finally { writing--; } })();
+      });
+      const syncClipboard = async (force = false) => {
+        if (item.ended || !item.rfb || writing) return;
+        const text = await call('clipboard:read').catch(() => '');
+        if (text && (force || text !== lastText)) { lastText = text; item.rfb.clipboardPasteFrom(text); }
+      };
+      const sendClipboard = () => safe(() => syncClipboard(true))();
+      item.clipboardTimer = setInterval(() => { if (activeId === item.id && document.hasFocus()) safe(syncClipboard)(); }, 1000);
+      // Ctrl+V: garante que o texto copiado agora há pouco chegue ao servidor ANTES das teclas de colar
+      // (a sincronização periódica pode ainda não ter rodado). Segura o V, sincroniza e só então envia.
+      let heldV = false, ctrlDown = false;
+      window.addEventListener('blur', () => { heldV = false; ctrlDown = false; });
+      item.mount.addEventListener('keyup', event => { if (event.key === 'Control') ctrlDown = false; }, true);
       item.mount.addEventListener('keydown', event => {
-        if (event.ctrlKey && event.shiftKey && event.code === 'KeyV') { event.preventDefault(); sendClipboard(); }
+        if (event.key === 'Control') ctrlDown = true;
+        if (event.ctrlKey && event.shiftKey && event.code === 'KeyV') { event.preventDefault(); sendClipboard(); return; }
+        if (event.ctrlKey && !event.shiftKey && !event.altKey && event.code === 'KeyV') {
+          event.preventDefault(); event.stopImmediatePropagation(); if (event.repeat) return; heldV = true;
+          safe(async () => {
+            await syncClipboard(); await new Promise(r => setTimeout(r, 120));
+            // Se o Ctrl foi solto durante a espera, o servidor já recebeu o "Ctrl solto": manda o Ctrl de novo.
+            const wrap = !ctrlDown; if (wrap) item.rfb?.sendKey(0xffe3, 'ControlLeft', true);
+            item.rfb?.sendKey(0x76, 'KeyV', true); item.rfb?.sendKey(0x76, 'KeyV', false);
+            if (wrap) item.rfb?.sendKey(0xffe3, 'ControlLeft', false);
+          })();
+        }
       }, true);
+      item.mount.addEventListener('keyup', event => { if (heldV && event.code === 'KeyV') { heldV = false; event.preventDefault(); event.stopImmediatePropagation(); } }, true);
       item.mount.addEventListener('paste', event => { event.preventDefault(); safe(() => item.rfb.clipboardPasteFrom(event.clipboardData.getData('text/plain')))(); }, true);
       const bar = elem('div', '', 'graphic-toolbar');
       bar.append(
         button('⌨ Ctrl+Alt+Del', () => item.rfb.sendCtrlAltDel()),
         button('📋 Colar texto', sendClipboard),
+        // O protocolo VNC não transfere arquivos: abre o painel Arquivos pelo canal paralelo de rede do
+        // mesmo host (compartilhamento C$ no Windows, SSH no Linux — ver remotefiles.cjs).
+        button('📁 Arquivos', async () => { activeId = item.id; $('file-panel').hidden = false; layout(); await setFileMode('network'); }),
         fullscreenButton(item.pane)
       );
       item.pane.append(bar);
@@ -376,7 +411,7 @@ async function closeSession(id, force = false) {
   const item = sessions.get(id); if (!item) return;
   if (!force && !item.ended && !await form({ title: 'Encerrar sessão?', message: item.name, fields: [], accept: 'Encerrar' })) return;
   await call(item.graphical ? 'graphics:close' : 'terminal:close', id);
-  item.rfb?.disconnect(); try { item.rdpSession?.shutdown(); } catch { /* já encerrada */ } item.terminal?.dispose(); item.pane.remove(); sessions.delete(id);
+  clearInterval(item.clipboardTimer); item.rfb?.disconnect(); try { item.rdpSession?.shutdown(); } catch { /* já encerrada */ } item.terminal?.dispose(); item.pane.remove(); sessions.delete(id);
   if (activeId === id) activeId = [...sessions.keys()].at(-1);
   layout(); scheduleSaveOpen();
 }
@@ -422,26 +457,15 @@ function updateNativeBounds() {
     safe(() => call('graphics:bounds', item.id, { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, visible: !item.pane.hidden && !modal }))();
   }
 }
-async function coloredPromptCommand(shell) {
-  // Se o Oh My Posh (instalável em Ferramentas → Ferramentas verificadas) já estiver presente, usa
-  // o tema dele (git, ícones, cores) — o mesmo estilo do oh-my-zsh, mas para PowerShell/bash no Windows.
-  const poshPath = await call('tools:path', 'ohmyposh').catch(() => null);
-  if (poshPath) {
-    if (shell === 'powershell') return `(& ${JSON.stringify(poshPath)} init pwsh) | Invoke-Expression\r`;
-    if (['bash', 'wsl', 'msys2', 'busybox'].includes(shell)) return `eval "$("${poshPath}" init bash)"\r`;
-  }
-  if (shell === 'powershell') return 'function prompt { $e=[char]27; "$e[36m$env:USERNAME$e[0m@$e[33m$env:COMPUTERNAME$e[0m $e[32m$($PWD.Path)$e[0m> " }\r';
-  if (shell === 'cmd') return 'prompt $E[36m%USERNAME%$E[0m@$E[33m%COMPUTERNAME%$E[0m $E[32m$P$E[0m$G\r';
-  if (['bash', 'wsl', 'msys2', 'busybox'].includes(shell)) return String.raw`export PS1='\[\e[36m\]\u\[\e[0m\]@\[\e[33m\]\h\[\e[0m\] \[\e[32m\]\w\[\e[0m\]\$ '` + '\r';
-  return '';
-}
 const HIGHLIGHT_ERROR = /\b(error|erro|failed|falhou|fatal|exception|panic)\b/gi;
 const HIGHLIGHT_WARNING = /\b(warning|warn|aviso|atenção|deprecated)\b/gi;
-function highlightOutput(data) {
-  if (!state.config.settings.highlightErrors) return data;
+// Destaque em cor (códigos ANSI) só em terminais remotos — SSH, Telnet, serial, Rlogin, Rsh —, onde
+// equipamentos e servidores costumam mandar texto sem cor; os shells locais ficam como o Windows entrega.
+function highlightOutput(item, data) {
+  if (!state.config.settings.highlightErrors || item.profile?.type === 'local') return data;
   return data.replace(HIGHLIGHT_ERROR, m => `\x1b[91m${m}\x1b[0m`).replace(HIGHLIGHT_WARNING, m => `\x1b[93m${m}\x1b[0m`);
 }
-api.on('terminal:data', ({ id, data }) => { const item = sessions.get(id); if (item?.terminal) { item.terminal.write(highlightOutput(data)); extras?.output(item, data); } });
+api.on('terminal:data', ({ id, data }) => { const item = sessions.get(id); if (item?.terminal) { item.terminal.write(highlightOutput(item, data)); extras?.output(item, data); } });
 api.on('terminal:exit', ({ id, code }) => { const item = sessions.get(id); if (item) { item.ended = true; item.terminal.writeln(`\r\n\x1b[90m[Sessão encerrada: ${code}]\x1b[0m`); renderTabs(); } });
 api.on('graphics:data', ({ id, data }) => { const item = sessions.get(id); if (item?.channel) item.channel.onmessage?.({ data: Uint8Array.from(atob(data), char => char.charCodeAt(0)).buffer }); });
 api.on('graphics:state', ({ id, type, message }) => {
@@ -563,8 +587,7 @@ $('tools-dialog').addEventListener('close', updateNativeBounds);
 $('settings').onclick = safe(async () => {
   const lock = await call('lock:status');
   const values = await form({ title: 'Preferências', message: 'Dados locais: ' + state.dataPath, fields: [{ name: 'fontSize', label: 'Fonte do terminal', type: 'number', value: state.config.settings.fontSize, min: 10, max: 28 }, { name: 'theme', label: 'Tema', value: state.config.settings.theme, options: [{ value: 'dark', label: 'Escuro' }, { value: 'light', label: 'Claro' }, { value: 'dracula', label: 'Dracula' }, { value: 'nord', label: 'Nord' }, { value: 'solarized', label: 'Solarized escuro' }, { value: 'monokai', label: 'Monokai' }] }, { name: 'scrollback', label: 'Linhas no histórico', type: 'number', value: state.config.settings.scrollback }, { name: 'syncFolder', label: 'Pasta de sincronização (OneDrive, Dropbox, repositório Git…)', value: state.config.settings.syncFolder || '', wide: true }, { name: 'autocomplete', label: 'Sugerir comandos do histórico enquanto digito', type: 'checkbox', value: state.config.settings.autocomplete !== false, wide: true }, { name: 'restoreSessions', label: 'Reabrir as sessões ao iniciar o aplicativo', type: 'checkbox', value: !!state.config.settings.restoreSessions, wide: true },
-    { name: 'highlightErrors', label: 'Destacar "error"/"erro", "failed"/"falhou" e "warning"/"aviso" automaticamente na saída do terminal', type: 'checkbox', value: state.config.settings.highlightErrors !== false, wide: true },
-    { name: 'coloredPrompt', label: 'Usar um prompt colorido nos terminais locais novos (Oh My Posh se instalado em Ferramentas, senão usuário@host:pasta simples)', type: 'checkbox', value: state.config.settings.coloredPrompt !== false, wide: true },
+    { name: 'highlightErrors', label: 'Destacar "error"/"erro", "failed"/"falhou" e "warning"/"aviso" em cor nos terminais remotos (SSH, Telnet, serial)', type: 'checkbox', value: state.config.settings.highlightErrors !== false, wide: true },
     { name: 'lockPassword', label: lock.enabled ? 'Trocar a senha mestra (deixe vazio para manter; “remover” abaixo tira a proteção)' : 'Definir senha mestra (bloqueia a lista de sessões ao abrir o app)', type: 'password', wide: true },
     { name: 'autoLockMinutes', label: 'Bloquear automaticamente após (minutos, 0 = nunca)', type: 'number', value: lock.autoLockMinutes || 15, min: 0, max: 180 },
     ...(lock.enabled ? [{ name: 'removeLock', label: 'Remover a senha mestra (pede a senha atual)', type: 'checkbox', wide: true }] : []),

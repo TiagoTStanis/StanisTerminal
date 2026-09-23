@@ -6,7 +6,7 @@ O projeto se inspira no uso de sessões do MobaXterm e do WindTerm. É um aplica
 
 ## Para usar
 
-Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.9.1-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
+Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.9.2-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
 
 **Evite a versão de arquivo único** (`StanisTerminal-*-win-x64-PORTATIL-LENTO-usar-o-zip.exe`): ela extrai os componentes a cada execução — não só na primeira — e pode levar mais de um minuto toda vez que você abrir. Use-a apenas para testar rapidamente em um computador onde você não vai instalar nada; para uso do dia a dia, use sempre o ZIP extraído. Não precisa instalar Node.js, Python ou Electron em nenhuma das distribuições. Use Windows 10/11 de 64 bits e uma pasta em que você possa salvar arquivos, como Documentos. Consulte os arquivos já publicados em [Releases](https://github.com/TiagoTStanis/StanisTerminal/releases); gerar um pacote local não o publica automaticamente. Para arquivos publicados, confira o SHA-256 e a assinatura GPG do release (veja [como verificar](docs/VERIFICAR-ASSINATURA.md); impressão digital `A345 44C3 43F2 E16B EF64  C7A4 95A1 3721 ED00 B9E6`).
 
@@ -19,7 +19,13 @@ O [manual de uso](docs/LEIA-ME.md) explica backups, X11, atalhos e mensagens com
 
 ## Recursos
 
-**Novo na 1.9.1 — RDP conecta em servidores Windows reais (correção importante):**
+**Novo na 1.9.2 — VNC com clipboard nos dois sentidos e arquivos à mão; terminais locais limpos:**
+- **Copiar no Windows e colar no VNC funciona:** o que você copia no Windows vai sozinho para o servidor VNC (a cada segundo, só com a aba VNC ativa e a janela em foco, e só quando o texto muda). O **Ctrl+V** comum dentro da tela VNC manda o texto antes das teclas de colar. Antes, o Ctrl+V colava o clipboard antigo da máquina remota.
+- **Botão "📁 Arquivos" na barra do VNC:** abre o painel Arquivos pelo canal de arquivos do mesmo host (compartilhamento `C$` no Windows, SSH no Linux). O protocolo VNC em si não transfere arquivos.
+- **Oh My Posh removido** do catálogo de Ferramentas (a cópia instalada é apagada ao abrir o app). O app também não injeta mais um prompt colorido no PowerShell e no cmd locais: eles ficam como o Windows entrega.
+- **Cores (ANSI) nos terminais remotos:** o destaque de erros e avisos agora vale só para SSH, Telnet, serial, Rlogin e Rsh. As cores que o próprio servidor manda continuam aparecendo normalmente.
+
+**Da 1.9.1 — RDP conecta em servidores Windows reais (correção importante):**
 - Em servidores Windows a conexão falhava com `RDCleanPath error (code 1) / HTTP 502`. O registro mostrava `Handshake TLS falhou: KEY_USAGE_BIT_INCORRECT`. **Não era firewall:** o certificado que o Windows gera para o RDP declara a chave só para "Key Encipherment", e a biblioteca TLS do Electron (BoringSSL) recusa esse certificado na negociação moderna (ECDHE/TLS 1.3), mesmo sem validar o certificado. O `mstsc` tolera isso. Agora, quando isso acontece, o Stanis Terminal refaz a conexão em TLS 1.2 com troca de chaves RSA, que usa exatamente o que o certificado permite.
 - **Erro real na tela:** no lugar do "502" genérico, a mensagem diz o motivo: conexão recusada, tempo esgotado (firewall/VPN), nome não encontrado (DNS) ou problema de certificado/TLS.
 - Teste novo `pnpm test:tls`, que roda o handshake no mesmo BoringSSL do Electron, com um certificado igual ao do RDP do Windows.
@@ -52,8 +58,7 @@ O [manual de uso](docs/LEIA-ME.md) explica backups, X11, atalhos e mensagens com
 - Suporta teclado, mouse, roda do mouse e Ctrl+Alt+Del.
 - Clipboard de texto sincronizado nos dois sentidos.
 - `RedirectClipboard`/`RedirectDrives` (arquivos via Explorer e unidades locais como `\\tsclient\`) continuam funcionando — são recursos do próprio protocolo RDP, não do controle ActiveX.
-- **Prompt colorido** nos terminais locais: se o **Oh My Posh** estiver instalado (Ferramentas → Ferramentas verificadas), usa o tema dele (git, ícones, cores — o mesmo estilo do oh-my-zsh, mas para PowerShell/bash no Windows); senão usa um prompt simples `usuário@host:pasta`. Pode ser desligado em Preferências.
-- **Destaque automático de erros e avisos** na saída do terminal: "error"/"erro", "failed"/"falhou" e "warning"/"aviso" ficam coloridos automaticamente. Pode ser desligado em Preferências.
+- **Destaque automático de erros e avisos** nos terminais remotos (SSH, Telnet, serial, Rlogin, Rsh): "error"/"erro", "failed"/"falhou" e "warning"/"aviso" ficam coloridos automaticamente. Pode ser desligado em Preferências.
 - Validado com testes automatizados reais: handshake TLS completo contra um servidor RDP simulado, e a sessão RDP real pela interface (carrega o WASM, conecta ao proxy, negocia o protocolo, mostra erro limpo sem travar). Login bem-sucedido contra um servidor RDP de verdade não foi possível testar neste ambiente — avise se encontrar algum problema.
 
 **Da 1.6.0:** copiar e colar no VNC, aba **Rede** para transferência de arquivos por VNC/RDP quando o compartilhamento `C$`/SSH estiver disponível.

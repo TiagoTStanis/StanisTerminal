@@ -121,8 +121,7 @@ function register() {
     const previous = config.value.settings || {};
     config.value.settings = { fontSize: Math.max(10, Math.min(28, Number(value.fontSize) || 14)), theme: THEMES.includes(value.theme) ? value.theme : 'light', restoreSessions: value.restoreSessions === undefined ? previous.restoreSessions === true : !!value.restoreSessions, scrollback: Math.max(1000, Math.min(100000, Number(value.scrollback) || 10000)),
       syncFolder: value.syncFolder === undefined ? previous.syncFolder || '' : text(value.syncFolder || '', 2048), autocomplete: value.autocomplete === undefined ? previous.autocomplete !== false : !!value.autocomplete,
-      highlightErrors: value.highlightErrors === undefined ? previous.highlightErrors !== false : !!value.highlightErrors,
-      coloredPrompt: value.coloredPrompt === undefined ? previous.coloredPrompt !== false : !!value.coloredPrompt };
+      highlightErrors: value.highlightErrors === undefined ? previous.highlightErrors !== false : !!value.highlightErrors };
     config.save(); return config.value.settings;
   });
   handle('macros:save', values => {
@@ -411,6 +410,8 @@ app.whenReady().then(async () => {
     remoteFiles = new RemoteFiles(terminals, ssh, vault, ask, config);
     terminals.getX11 = () => graphics.getX11();
     if (tools.installed('tightvnc')) cleanupStale(tools.file('tightvnc')).catch(() => {});
+    // Oh My Posh saiu do catálogo na 1.9.2: apaga a cópia que tenha sido instalada antes.
+    fs.promises.rm(path.join(tools.root, 'ohmyposh'), { recursive: true, force: true }).catch(() => {});
     register();
     let closing = false;
     window.on('close', event => {

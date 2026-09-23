@@ -62,7 +62,7 @@ class Config {
   constructor(directory) {
     this.directory = directory;
     this.file = path.join(directory, 'config.json');
-    this.value = readJSON(this.file, { version: 1, profiles: [], snippets: [], folders: [], macros: [], scripts: [], packageLists: [], tools: {}, settings: { fontSize: 14, theme: 'light', scrollback: 10000, restoreSessions: false, highlightErrors: true, coloredPrompt: true } });
+    this.value = readJSON(this.file, { version: 1, profiles: [], snippets: [], folders: [], macros: [], scripts: [], packageLists: [], tools: {}, settings: { fontSize: 14, theme: 'light', scrollback: 10000, restoreSessions: false, highlightErrors: true } });
     this.value.profiles = (this.value.profiles || []).map(profile);
   }
   save() { writeJSON(this.file, this.value); }

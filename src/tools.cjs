@@ -18,12 +18,6 @@ const CATALOG = {
     sha256: '07bb1e5b095b00d68a695481f9240879f33c5724b40aa2308f999d54ed78f075', maxBytes: 5 * 1024 * 1024, file: 'busybox.exe',
     source: 'https://frippery.org/busybox/ — hash do SHA256SUM assinado (GPG) por Ron Yorston, chave B43E 244B 92A8 1389 CAAA A171 690E 10A0 513D A84B'
   },
-  ohmyposh: {
-    name: 'Oh My Posh (prompt colorido com tema, git, ícones — estilo oh-my-zsh para PowerShell/cmd/bash)', version: '31.3.0', license: 'MIT',
-    url: 'https://github.com/JanDeDobbeleer/oh-my-posh/releases/download/v31.3.0/posh-windows-amd64.exe',
-    sha256: 'ca755ea573fa0e88ff60556e8ee6cc756f361c0c223883225318a40b2ded2392', maxBytes: 20 * 1024 * 1024, file: 'oh-my-posh.exe',
-    source: 'https://ohmyposh.dev/ — hash calculado sobre o executável assinado (Authenticode válido, CN=Jan Joris De Dobbeleer)'
-  },
   tightvnc: {
     name: 'TightVNC (servidor VNC para compartilhar esta tela)', version: '2.8.88', license: 'GPL-2.0',
     url: 'https://www.tightvnc.com/download/2.8.88/tightvnc-2.8.88-gpl-setup-64bit.msi',
