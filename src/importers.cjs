@@ -83,7 +83,40 @@ function previewRows(rows, source, warnings = []) {
   return { rows: clean, warnings, source };
 }
 
+// Arquivo .rdp (Conexão de Área de Trabalho Remota ou RemoteApp publicado pelo RD Web): linhas "chave:tipo:valor".
+// Senhas nunca são lidas (o .rdp costuma trazer só um blob cifrado para outro computador).
+function parseRdp(contents, file = 'Conexão.rdp') {
+  const values = {};
+  for (const line of contents.split(/\r?\n/)) { const m = /^([^:]+):([sib]):(.*)$/i.exec(line.trim()); if (m) values[m[1].trim().toLowerCase()] = m[3].trim(); }
+  const address = values['full address'] || values['alternate full address'] || '';
+  if (!address) throw new Error('Arquivo .rdp sem "full address".');
+  let host = address, port = Number(values['server port']) || 3389;
+  const v6 = /^\[([^\]]+)\](?::(\d+))?$/.exec(address), v4 = /^([^:]+):(\d+)$/.exec(address);
+  if (v6) { host = v6[1]; if (v6[2]) port = Number(v6[2]); } else if (v4) { host = v4[1]; port = Number(v4[2]); }
+  const base = path.basename(file).replace(/\.rdp$/i, '');
+  const program = values['remoteapplicationmode'] === '1' ? values['remoteapplicationprogram'] || '' : '';
+  const appName = values['remoteapplicationname'] || '';
+  return { name: (program && appName) || base, group: program ? 'RemoteApps' : 'Importado de .rdp', type: 'rdp', host, port, username: values['username'] || '',
+    ...(program ? { remoteApp: { program, name: appName || base, args: values['remoteapplicationcmdline'] || '', workdir: values['shell working directory'] || '' } } : {}),
+    gateway: values['gatewayhostname'] || '' };
+}
+function rdpRows(parsed, source) {
+  const gateways = [...new Set(parsed.filter(r => r.gateway).map(r => r.gateway))];
+  const warnings = gateways.length ? [`RD Gateway (${gateways.join(', ')}) ainda não é suportado: a conexão vai direto ao servidor.`] : [];
+  return previewRows(parsed.map(({ gateway, ...row }) => row), source, warnings);
+}
+async function importRdpFolder(directory) {
+  const files = (await fs.promises.readdir(directory, { withFileTypes: true })).filter(e => e.isFile() && /\.rdp$/i.test(e.name)).slice(0, 500);
+  const parsed = []; let failed = 0;
+  for (const entry of files) { try { parsed.push(parseRdp(await readLimited(path.join(directory, entry.name), 1024 * 1024), entry.name)); } catch { failed++; } }
+  const result = rdpRows(parsed, `Pasta ${directory}`);
+  if (!files.length) result.warnings.push('Nenhum arquivo .rdp nesta pasta.');
+  if (failed) result.warnings.push(`${failed} arquivo(s) .rdp não puderam ser lidos.`);
+  return result;
+}
+
 async function importFile(file) {
+  if (/\.rdp$/i.test(file)) return rdpRows([parseRdp(await readLimited(file, 1024 * 1024), file)], 'Arquivo .rdp');
   const contents = await readLimited(file);
   if (contents.trimStart().startsWith('<') || /\.xml$/i.test(file)) return parseMremote(contents);
   if (contents.trimStart().startsWith('{') || /\.json$/i.test(file)) {
@@ -141,4 +174,4 @@ function prepareImport(rows, existing) {
   return { profiles: existing.concat(added.map(item => item.p)), added: added.length, skipped };
 }
 
-module.exports = { importPutty, importSshConfig, parseSshConfig, parseMremote, importFile, scanImports, prepareImport };
+module.exports = { importPutty, importSshConfig, parseSshConfig, parseMremote, parseRdp, importFile, importRdpFolder, scanImports, prepareImport };

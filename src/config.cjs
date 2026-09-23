@@ -45,6 +45,12 @@ function profile(input) {
     p.jumpId = text(input.jumpId || '', 80); if (input.proxyHost) { if (p.jumpId) throw new Error('Use gateway SSH ou proxy SOCKS5, não os dois.'); p.proxyHost = host(input.proxyHost); p.proxyPort = port(input.proxyPort, 1080); }
     if (p.type === 'vnc' && ['windows', 'linux'].includes(input.remoteOS)) p.remoteOS = input.remoteOS;
     if (p.type === 'rdp' && RDP_RESOLUTIONS.includes(input.resolution)) p.resolution = input.resolution;
+    // RemoteApp: abre só o programa (canal RAIL) em vez da área de trabalho; program vem do .rdp (ex.: ||calc).
+    const app = input.remoteApp;
+    if (p.type === 'rdp' && app && typeof app.program === 'string' && app.program.trim()) {
+      const line = (value, max) => { const v = text(value || '', max); if (/[\r\n]/.test(v)) throw new Error('RemoteApp inválido.'); return v; };
+      p.remoteApp = { program: line(app.program.trim(), 1024), name: line(app.name, 200), args: line(app.args, 2048), workdir: line(app.workdir, 1024) };
+    }
   }
   return p;
 }

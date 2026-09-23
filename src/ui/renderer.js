@@ -98,7 +98,7 @@ function localProfile(shell = 'powershell') { return { type: 'local', shell, nam
 async function sessionForm(existing = {}) {
   const type = existing.type || 'ssh';
   let lastType = type;
-  const result = await form({ title: existing.id ? 'Editar sessão' : 'Nova sessão', message: 'Preencha os dados da conexão. As opções extras ficam em Avançados.', accept: 'Salvar sessão', advancedFields: ['group', 'newGroup', 'cwd', 'port', 'keyPath', 'useAgent', 'agentForward', 'proxyHost', 'proxyPort', 'jumpId'], fields: [
+  const result = await form({ title: existing.id ? 'Editar sessão' : 'Nova sessão', message: 'Preencha os dados da conexão. As opções extras ficam em Avançados.', accept: 'Salvar sessão', advancedFields: ['group', 'newGroup', 'cwd', 'port', 'remoteAppProgram', 'keyPath', 'useAgent', 'agentForward', 'proxyHost', 'proxyPort', 'jumpId'], fields: [
     { name: 'name', label: 'Nome', value: existing.name || '', required: true }, { name: 'group', label: 'Pasta', value: existing.group || 'Minhas sessões', options: [...new Set(['Minhas sessões', ...(state.config.folders || []), ...state.config.profiles.map(p => p.group)])].sort((a, b) => a.localeCompare(b)).map(f => ({ value: f, label: f })) },
     { name: 'type', label: 'Protocolo', value: type, options: [{ value: 'ssh', label: 'SSH + SFTP' }, { value: 'local', label: 'Terminal local' }, { value: 'rdp', label: 'RDP integrado' }, { value: 'vnc', label: 'VNC integrado' }, { value: 'telnet', label: 'Telnet' }, { value: 'serial', label: 'Serial (8N1)' }, { value: 'x11', label: 'Servidor X11 local' }, { value: 'ssh-x11', label: 'SSH com aplicativos X11' }, { value: 'xdmcp', label: 'Área de trabalho XDMCP' }, { value: 'rlogin', label: 'Rlogin (sem criptografia)' }, { value: 'rsh', label: 'Rsh — executar comando (sem criptografia)' }] },
     { name: 'shell', label: 'Shell local', value: existing.shell || 'powershell', options: ['powershell', 'cmd', 'bash', 'wsl', 'busybox', 'msys2'] },
@@ -106,6 +106,7 @@ async function sessionForm(existing = {}) {
     { name: 'host', label: 'Host / IP', value: existing.host || '' }, { name: 'port', label: 'Porta (vazio = padrão)', type: 'number', value: existing.port || '', min: 1, max: 65535 },
     { name: 'username', label: 'Usuário / domínio\\usuário', value: existing.username || '' },
     { name: 'password', label: state.secrets?.[existing.id] ? 'Senha (guardada; deixe vazio para manter)' : 'Senha (opcional; guardada com criptografia do Windows)', type: 'password', wide: true },
+    { name: 'remoteAppProgram', label: 'Programa RemoteApp (opcional, ex.: ||calc — abre só o programa)', value: existing.remoteApp?.program || '', wide: true },
     { name: 'resolution', label: 'Resolução da tela remota', value: existing.resolution || '', options: [{ value: '', label: 'Ajustar à janela' }, ...['1024x768', '1280x720', '1280x800', '1366x768', '1440x900', '1600x900', '1920x1080'].map(v => ({ value: v, label: v.replace('x', ' × ') }))] },
     { name: 'keyPath', label: 'Arquivo de chave privada SSH (opcional)', value: existing.keyPath || '', wide: true },
     { name: 'useAgent', label: 'Usar o agente SSH do Windows (chaves ficam no agente, sem senha)', type: 'checkbox', value: !!existing.useAgent, wide: true },
@@ -119,13 +120,15 @@ async function sessionForm(existing = {}) {
   ], onChange: f => {
     const selected = f.elements.type.value;
     if (selected !== lastType) { f.elements.port.value = ''; lastType = selected; }
-    const show = ['name', 'group', 'newGroup', 'type', ...(selected === 'x11' ? [] : selected === 'xdmcp' ? ['host'] : selected === 'local' ? ['shell', 'cwd'] : selected === 'serial' ? ['device', 'baudRate'] : ['ssh', 'ssh-x11'].includes(selected) ? ['host', 'port', 'username', 'password', 'keyPath', 'useAgent', 'agentForward', 'proxyHost', 'proxyPort', 'jumpId'] : selected === 'rdp' ? ['host', 'port', 'username', 'password', 'resolution'] : selected === 'rlogin' ? ['host', 'port', 'username'] : selected === 'rsh' ? ['host', 'port', 'username', 'command'] : ['host', 'port'])];
+    const show = ['name', 'group', 'newGroup', 'type', ...(selected === 'x11' ? [] : selected === 'xdmcp' ? ['host'] : selected === 'local' ? ['shell', 'cwd'] : selected === 'serial' ? ['device', 'baudRate'] : ['ssh', 'ssh-x11'].includes(selected) ? ['host', 'port', 'username', 'password', 'keyPath', 'useAgent', 'agentForward', 'proxyHost', 'proxyPort', 'jumpId'] : selected === 'rdp' ? ['host', 'port', 'username', 'password', 'resolution', 'remoteAppProgram'] : selected === 'rlogin' ? ['host', 'port', 'username'] : selected === 'rsh' ? ['host', 'port', 'username', 'command'] : ['host', 'port'])];
     for (const field of $('dialog-fields').querySelectorAll('[data-field]')) { field.hidden = !show.includes(field.dataset.field); for (const input of field.querySelectorAll('input,select')) input.disabled = field.hidden; }
     f.elements.host.required = show.includes('host');
     f.elements.command.required = selected === 'rsh';
   } });
   if (!result) return;
-  const saved = await call('profile:save', { ...result, group: (result.newGroup || '').trim() || result.group, id: existing.id });
+  const { remoteAppProgram, ...values } = result;
+  const remoteApp = remoteAppProgram?.trim() ? { ...existing.remoteApp, program: remoteAppProgram.trim() } : undefined;
+  const saved = await call('profile:save', { ...values, remoteApp, group: (values.newGroup || '').trim() || values.group, id: existing.id });
   state.secrets = await call('profile:secrets'); state.config.profiles = state.config.profiles.filter(p => p.id !== saved.id).concat(saved); renderProfiles(); toast('Sessão salva. Clique nela para conectar.');
 }
 let tree = null;
@@ -254,10 +257,15 @@ async function loadIronRdp() {
 }
 const RDP_ERROR_KINDS = { 0: 'Erro geral', 1: 'Senha incorreta', 2: 'Falha no login', 3: 'Acesso negado', 4: 'Falha no proxy RDCleanPath', 5: 'Falha ao conectar no proxy', 6: 'Falha na negociação do protocolo' };
 function rdpErrorText(error) {
+  let text = error?.message || String(error);
   if (error && typeof error === 'object' && typeof error.kind === 'function') {
-    try { return `${RDP_ERROR_KINDS[error.kind()] || 'Erro desconhecido'}${error.backtrace ? ': ' + error.backtrace() : ''}`; } catch { /* objeto já liberado pelo wasm */ }
+    try { text = `${RDP_ERROR_KINDS[error.kind()] || 'Erro desconhecido'}${error.backtrace ? ': ' + error.backtrace() : ''}`; } catch { /* objeto já liberado pelo wasm */ }
   }
-  return error?.message || String(error);
+  // RemoteApp: explica em português os dois casos comuns.
+  if (/does not support required RemoteApp/i.test(text)) return 'este servidor não oferece RemoteApp. É preciso um Windows Server com Serviços de Área de Trabalho Remota publicando o programa (ou RemoteApp liberado no registro).';
+  const refused = /não abriu o RemoteApp (.*?) \((\w+)/.exec(text);
+  if (refused) return `o servidor recusou abrir ${refused[1]} (${{ NotInAllowlist: 'programa não publicado / fora da lista permitida', FileNotFound: 'programa não encontrado no servidor', SessionLocked: 'sessão bloqueada', HookNotLoaded: 'componente RemoteApp do servidor não carregou' }[refused[2]] || refused[2]}).`;
+  return text;
 }
 async function openRdp(item, result) {
   const canvas = document.createElement('canvas'); canvas.className = 'rdp-canvas'; canvas.tabIndex = 0;
@@ -267,7 +275,8 @@ async function openRdp(item, result) {
   catch (error) { toast('Não foi possível carregar o componente RDP: ' + (error?.message || error)); item.ended = true; renderTabs(); return; }
   // Resolução fixa do perfil (útil quando o servidor não acompanha a janela, ex.: VirtualBox sem Guest Additions);
   // sem ela, pede o tamanho do painel.
-  const fixed = /^(\d+)x(\d+)$/.exec(result.profile.resolution || '');
+  const remoteApp = result.profile.remoteApp?.program ? result.profile.remoteApp : null;
+  const fixed = !remoteApp && /^(\d+)x(\d+)$/.exec(result.profile.resolution || '');
   const width = fixed ? +fixed[1] : Math.max(320, Math.round(item.mount.clientWidth || 1280)), height = fixed ? +fixed[2] : Math.max(240, Math.round(item.mount.clientHeight || 800));
   const builder = new rdp.SessionBuilder();
   builder.username(result.profile.username || ''); builder.password(result.password || '');
@@ -276,6 +285,8 @@ async function openRdp(item, result) {
   builder.authToken('none');
   builder.desktopSize(new rdp.DesktopSize(width, height));
   builder.renderCanvas(canvas);
+  // RemoteApp (.rdp do RD Web): o servidor abre só o programa, desenhado no canvas desta aba.
+  if (remoteApp) builder.extension(new rdp.Extension('remote_app', { program: remoteApp.program, args: remoteApp.args || '', work_dir: remoteApp.workdir || '' }));
   // Escala o canvas para caber no painel mantendo a proporção da tela remota (que pode diferir da pedida
   // e mudar no meio da sessão); o mouse converte de volta pelo getBoundingClientRect.
   const fit = () => {
@@ -630,8 +641,8 @@ let importing = false;
 async function importConnections(channel) {
   if (importing) return;
   importing = true; showImport();
-  $('import-file').disabled = $('import-scan').disabled = true;
-  $('import-status').textContent = channel === 'import:scan' ? 'Procurando conexões nos locais padrão…' : 'Escolha o arquivo exportado pelo outro aplicativo.';
+  $('import-file').disabled = $('import-scan').disabled = $('import-rdp-folder').disabled = true;
+  $('import-status').textContent = channel === 'import:scan' ? 'Procurando conexões nos locais padrão…' : channel === 'import:rdpFolder' ? 'Escolha a pasta com os arquivos .rdp.' : 'Escolha o arquivo exportado pelo outro aplicativo.';
   try {
     const found = await call(channel);
     if (!found) { $('import-status').textContent = 'Nenhum arquivo selecionado. Você pode escolher um arquivo ou procurar neste computador.'; return; }
@@ -650,9 +661,10 @@ async function importConnections(channel) {
     state.config = result.config; state.secrets = await call('profile:secrets'); renderProfiles();
     toast(`${result.added} conexão(ões) importada(s).${result.skipped ? ' ' + result.skipped + ' já existente(s), sem duplicar.' : ''}`);
   } catch (error) { showImport(); $('import-status').textContent = error.message; }
-  finally { importing = false; $('import-file').disabled = $('import-scan').disabled = false; }
+  finally { importing = false; $('import-file').disabled = $('import-scan').disabled = $('import-rdp-folder').disabled = false; }
 }
 $('import-scan').onclick = () => importConnections('import:scan');
+$('import-rdp-folder').onclick = () => importConnections('import:rdpFolder');
 $('import-file').onclick = $('import-sessions').onclick = () => importConnections('import:file');
 // Armazenamento opcional: lateral expandida quando não há preferência válida.
 const sidebar = document.querySelector('.sidebar');

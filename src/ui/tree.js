@@ -86,7 +86,7 @@ export function setupTree(ctx) {
     const row = elem('div', '', 'tree-row session'); row.style.setProperty('--depth', depth); row.draggable = !!p.id; row.dataset.id = p.id || '';
     const open = elem('button', '', 'tree-main'); open.type = 'button'; open.title = `${p.name}${p.host ? ' — ' + p.host : ''}`;
     const info = elem('span', '', 'tree-label'); info.append(elem('span', p.name, 'tree-name'), elem('small', p.type === 'local' ? { powershell: 'PowerShell', cmd: 'Prompt de comando', bash: 'Git Bash', wsl: 'Linux (WSL)', busybox: 'Comandos Unix', msys2: 'Unix com pacman' }[p.shell] : p.type === 'serial' ? `${p.device} · ${p.baudRate}` : p.host ? `${p.username ? p.username + '@' : ''}${p.host}${saved ? ' 🔒' : ''}` : ''));
-    open.append(elem('span', BADGE[p.type] || p.type.toUpperCase(), 'badge badge-' + p.type), info); open.onclick = safe(() => openSession(p));
+    open.append(elem('span', p.remoteApp ? 'APP' : BADGE[p.type] || p.type.toUpperCase(), 'badge badge-' + p.type), info); open.onclick = safe(() => openSession(p));
     row.append(open);
     if (p.id) {
       const more = elem('button', '', 'tree-more'); more.type = 'button'; more.setAttribute('aria-label', `Opções de ${p.name}`); more.append(icon('more')); more.onclick = event => { event.stopPropagation(); const r = more.getBoundingClientRect(); openMenu(r.left, r.bottom + 2, sessionActions(p)); };

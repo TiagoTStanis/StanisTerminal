@@ -16,7 +16,7 @@ const { Mirror } = require('./mirror.cjs');
 const { Tools } = require('./tools.cjs');
 const { Vault } = require('./vault.cjs');
 const { RemoteFiles } = require('./remotefiles.cjs');
-const { scanImports, importFile, prepareImport } = require('./importers.cjs');
+const { scanImports, importFile, importRdpFolder, prepareImport } = require('./importers.cjs');
 const { uploadZmodem, downloadZmodem } = require('./zmodemio.cjs');
 const { Packages, ID: PACKAGE_ID } = require('./packages.cjs');
 const { MsysPackages, NAME: MSYS_NAME } = require('./msyspkg.cjs');
@@ -331,9 +331,14 @@ function register() {
   handle('transfer:list', () => transfers.list());
   handle('import:scan', () => scanImports());
   handle('import:file', async () => {
-    const result = await dialog.showOpenDialog(window, { title: 'Escolher arquivo de conexões', filters: [{ name: 'mRemoteNG XML / Stanis Terminal JSON', extensions: ['xml', 'json'] }, { name: 'OpenSSH config / todos os arquivos', extensions: ['*'] }], properties: ['openFile'] });
+    const result = await dialog.showOpenDialog(window, { title: 'Escolher arquivo de conexões', filters: [{ name: 'mRemoteNG XML / Stanis Terminal JSON / Área de Trabalho Remota (.rdp)', extensions: ['xml', 'json', 'rdp'] }, { name: 'OpenSSH config / todos os arquivos', extensions: ['*'] }], properties: ['openFile'] });
     if (result.canceled) return null;
     return importFile(result.filePaths[0]);
+  });
+  handle('import:rdpFolder', async () => {
+    const result = await dialog.showOpenDialog(window, { title: 'Escolher a pasta com os RemoteApps (.rdp)', properties: ['openDirectory'] });
+    if (result.canceled) return null;
+    return importRdpFolder(result.filePaths[0]);
   });
   handle('import:apply', rows => {
     const prepared = prepareImport(rows, config.value.profiles);

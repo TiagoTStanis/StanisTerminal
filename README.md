@@ -6,7 +6,7 @@ O projeto se inspira no uso de sessões do MobaXterm e do WindTerm. É um aplica
 
 ## Para usar
 
-Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.9.2-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
+Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.10.0-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
 
 **Evite a versão de arquivo único** (`StanisTerminal-*-win-x64-PORTATIL-LENTO-usar-o-zip.exe`): ela extrai os componentes a cada execução — não só na primeira — e pode levar mais de um minuto toda vez que você abrir. Use-a apenas para testar rapidamente em um computador onde você não vai instalar nada; para uso do dia a dia, use sempre o ZIP extraído. Não precisa instalar Node.js, Python ou Electron em nenhuma das distribuições. Use Windows 10/11 de 64 bits e uma pasta em que você possa salvar arquivos, como Documentos. Consulte os arquivos já publicados em [Releases](https://github.com/TiagoTStanis/StanisTerminal/releases); gerar um pacote local não o publica automaticamente. Para arquivos publicados, confira o SHA-256 e a assinatura GPG do release (veja [como verificar](docs/VERIFICAR-ASSINATURA.md); impressão digital `A345 44C3 43F2 E16B EF64  C7A4 95A1 3721 ED00 B9E6`).
 
@@ -19,7 +19,13 @@ O [manual de uso](docs/LEIA-ME.md) explica backups, X11, atalhos e mensagens com
 
 ## Recursos
 
-**Novo na 1.9.2 — VNC com clipboard nos dois sentidos e arquivos à mão; terminais locais limpos:**
+**Novo na 1.10.0 — RemoteApp dentro do Stanis Terminal:**
+- **Importar → "Pasta de RemoteApps (.rdp)":** aponte a pasta com os arquivos `.rdp` (os que o RD Web ou a pasta "Work Resources" geram). Cada arquivo vira uma sessão na pasta **RemoteApps**, com o selo **APP**. "Escolher arquivo" também aceita um `.rdp` avulso. Senhas não são importadas.
+- **Clicou, abriu na aba:** o servidor abre só o programa (modo RemoteApp do RDP), desenhado dentro da aba do Stanis Terminal, com mouse, teclado e clipboard.
+- Também dá para criar à mão: em Nova sessão → RDP → Avançados, preencha "Programa RemoteApp" (ex.: `||calc`).
+- **Requisitos e limites:** o servidor precisa oferecer RemoteApp (Windows Server com Serviços de Área de Trabalho Remota publicando o programa, ou RemoteApp liberado no registro). Se não oferecer, a mensagem diz isso. RD Gateway ainda não é suportado (a importação avisa). Nesta primeira versão o programa aparece dentro da aba, não como janela solta no desktop.
+
+**Da 1.9.2 — VNC com clipboard nos dois sentidos e arquivos à mão; terminais locais limpos:**
 - **Copiar no Windows e colar no VNC funciona:** o que você copia no Windows vai sozinho para o servidor VNC (a cada segundo, só com a aba VNC ativa e a janela em foco, e só quando o texto muda). O **Ctrl+V** comum dentro da tela VNC manda o texto antes das teclas de colar. Antes, o Ctrl+V colava o clipboard antigo da máquina remota.
 - **Botão "📁 Arquivos" na barra do VNC:** abre o painel Arquivos pelo canal de arquivos do mesmo host (compartilhamento `C$` no Windows, SSH no Linux). O protocolo VNC em si não transfere arquivos.
 - **Oh My Posh removido** do catálogo de Ferramentas (a cópia instalada é apagada ao abrir o app). O app também não injeta mais um prompt colorido no PowerShell e no cmd locais: eles ficam como o Windows entrega.
