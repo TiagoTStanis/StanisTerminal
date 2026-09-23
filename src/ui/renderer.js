@@ -175,7 +175,18 @@ async function openSession(profile) {
         send(bytes) { let binary = ''; for (const b of new Uint8Array(bytes.buffer || bytes, bytes.byteOffset || 0, bytes.byteLength)) binary += String.fromCharCode(b); safe(() => call('graphics:write', item.id, btoa(binary)))(); },
         close() { this.readyState = 3; safe(() => call('graphics:close', item.id))(); }
       };
-      item.channel = channel; item.rfb = new RFB(item.mount, channel); item.rfb.scaleViewport = true; item.rfb.resizeSession = true; item.rfb.showDotCursor = true;
+      item.channel = channel; item.rfb = new RFB(item.mount, channel); item.rfb.showDotCursor = true;
+      // Modo de exibição, lembrado por sessão: "ajustar" encolhe a tela remota inteira para caber no painel;
+      // "real" mostra 100% com barras de rolagem (útil com duas telas) e não pede ao servidor para
+      // redimensionar a sessão, para não reorganizar a área de trabalho remota.
+      const viewKey = 'vnc-view:' + profile.id;
+      const setView = mode => {
+        item.vncView = mode; item.rfb.scaleViewport = mode === 'fit'; item.rfb.resizeSession = mode === 'fit';
+        if (item.viewButton) item.viewButton.textContent = mode === 'fit' ? '⤢ Tamanho real' : '⤡ Ajustar à janela';
+        try { localStorage.setItem(viewKey, mode); } catch { /* preferência opcional */ }
+      };
+      let savedView = 'fit'; try { savedView = localStorage.getItem(viewKey) === 'real' ? 'real' : 'fit'; } catch { /* sem armazenamento */ }
+      setView(savedView);
       item.rfb.addEventListener('credentialsrequired', safe(async () => {
         const credentials = await form({ title: 'Autenticação VNC', fields: [{ name: 'username', label: 'Usuário (quando exigido)' }, { name: 'password', label: 'Senha', type: 'password' }] });
         if (credentials) item.rfb.sendCredentials(credentials); else await closeSession(item.id, true);
@@ -236,10 +247,11 @@ async function openSession(profile) {
         button('📋 Colar texto', sendClipboard),
         // O protocolo VNC não transfere arquivos: abre o painel Arquivos pelo canal paralelo de rede do
         // mesmo host (compartilhamento C$ no Windows, SSH no Linux — ver remotefiles.cjs).
+        (item.viewButton = button('', () => setView(item.vncView === 'fit' ? 'real' : 'fit'))),
         button('📁 Arquivos', async () => { activeId = item.id; $('file-panel').hidden = false; layout(); await setFileMode('network'); }),
         fullscreenButton(item.pane)
       );
-      item.pane.append(bar);
+      item.pane.append(bar); setView(item.vncView);
       await call('graphics:activate', item.id);
     } else if (profile.type === 'rdp') {
       await openRdp(item, result);

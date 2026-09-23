@@ -213,6 +213,16 @@ function sftpServer(sftp) {
     await page.waitForFunction(() => true); await new Promise(resolve => setTimeout(resolve, 2500));
     assert.ok(vncEvents.includes('cut:Sincronizado sozinho'), `a sincronização automática não mandou o texto. Recebido: ${JSON.stringify(vncEvents)}`);
     console.log('PASS: o que é copiado no Windows vai sozinho para o servidor VNC com a aba ativa.');
+    // Modo de exibição: "ajustar" estica/encolhe a tela para o painel; "tamanho real" mostra 100% (com rolagem
+    // quando a tela remota é maior, ex.: duas telas) e deixa de pedir redimensionamento ao servidor.
+    const canvasWidth = () => page.evaluate(() => Math.round(document.querySelector('.graphic-mount canvas').getBoundingClientRect().width));
+    assert.ok(await canvasWidth() > 64, 'no modo ajustar, a tela 64x64 deveria ser esticada para o painel');
+    await page.locator('.graphic-toolbar button', { hasText: 'Tamanho real' }).click({ force: true });
+    await page.waitForFunction(() => Math.round(document.querySelector('.graphic-mount canvas').getBoundingClientRect().width) === 64);
+    assert.ok(await page.locator('.graphic-toolbar button', { hasText: 'Ajustar à janela' }).count(), 'o botão deveria trocar para "Ajustar à janela"');
+    await page.locator('.graphic-toolbar button', { hasText: 'Ajustar à janela' }).click({ force: true });
+    await page.waitForFunction(() => Math.round(document.querySelector('.graphic-mount canvas').getBoundingClientRect().width) > 64);
+    console.log('PASS: VNC alterna entre ajustar à janela e tamanho real (100%).');
     // Botão Arquivos da barra VNC: abre o painel e inicia o canal de arquivos do host (pergunta o sistema).
     await page.locator('.graphic-toolbar button', { hasText: 'Arquivos' }).click({ force: true });
     await page.locator('#dialog-title', { hasText: 'Sistema do host' }).waitFor({ timeout: 5000 });

@@ -6,7 +6,7 @@ O projeto se inspira no uso de sessões do MobaXterm e do WindTerm. É um aplica
 
 ## Para usar
 
-Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.10.0-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
+Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.10.1-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
 
 **Evite a versão de arquivo único** (`StanisTerminal-*-win-x64-PORTATIL-LENTO-usar-o-zip.exe`): ela extrai os componentes a cada execução — não só na primeira — e pode levar mais de um minuto toda vez que você abrir. Use-a apenas para testar rapidamente em um computador onde você não vai instalar nada; para uso do dia a dia, use sempre o ZIP extraído. Não precisa instalar Node.js, Python ou Electron em nenhuma das distribuições. Use Windows 10/11 de 64 bits e uma pasta em que você possa salvar arquivos, como Documentos. Consulte os arquivos já publicados em [Releases](https://github.com/TiagoTStanis/StanisTerminal/releases); gerar um pacote local não o publica automaticamente. Para arquivos publicados, confira o SHA-256 e a assinatura GPG do release (veja [como verificar](docs/VERIFICAR-ASSINATURA.md); impressão digital `A345 44C3 43F2 E16B EF64  C7A4 95A1 3721 ED00 B9E6`).
 
@@ -19,7 +19,9 @@ O [manual de uso](docs/LEIA-ME.md) explica backups, X11, atalhos e mensagens com
 
 ## Recursos
 
-**Novo na 1.10.0 — RemoteApp dentro do Stanis Terminal:**
+**Novo na 1.10.1 — VNC com duas telas:** botão **"⤢ Tamanho real" / "⤡ Ajustar à janela"** na barra do VNC. "Ajustar" mostra a tela remota inteira encolhida no painel (como antes). "Tamanho real" mostra 100%, com barras de rolagem horizontal e vertical, para percorrer duas telas (ex.: 3840×1080) com o texto legível. Nesse modo o app também não pede ao servidor para redimensionar a sessão, para não reorganizar a área de trabalho remota. A escolha é lembrada por sessão.
+
+**Da 1.10.0 — RemoteApp dentro do Stanis Terminal:**
 - **Importar → "Pasta de RemoteApps (.rdp)":** aponte a pasta com os arquivos `.rdp` (os que o RD Web ou a pasta "Work Resources" geram). Cada arquivo vira uma sessão na pasta **RemoteApps**, com o selo **APP**. "Escolher arquivo" também aceita um `.rdp` avulso. Senhas não são importadas.
 - **Clicou, abriu na aba:** o servidor abre só o programa (modo RemoteApp do RDP), desenhado dentro da aba do Stanis Terminal, com mouse, teclado e clipboard.
 - Também dá para criar à mão: em Nova sessão → RDP → Avançados, preencha "Programa RemoteApp" (ex.: `||calc`).
