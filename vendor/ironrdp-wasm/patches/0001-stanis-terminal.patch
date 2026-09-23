@@ -98,6 +98,299 @@ index 9f0ddf3f..4da1550d 100644
          assert!(!client_info.flags.contains(ClientInfoFlags::AUDIO_CAPTURE));
      }
  
+diff --git a/crates/ironrdp-connector/src/connection_activation.rs b/crates/ironrdp-connector/src/connection_activation.rs
+index de852dc0..51cdc765 100644
+--- a/crates/ironrdp-connector/src/connection_activation.rs
++++ b/crates/ironrdp-connector/src/connection_activation.rs
+@@ -153,6 +153,14 @@ impl Sequence for ConnectionActivationSequence {
+ 
+                 let send_data_indication_ctx =
+                     ironrdp_pdu::mcs::decode_send_data_indication(input).map_err(ConnectorError::decode)?;
++                // An RD Connection Broker sends a Server Redirection PDU instead of Demand Active; the
++                // caller reconnects to where it points (see server_redirection.rs).
++                if let Some(redirection) =
++                    crate::server_redirection::parse_server_redirection(send_data_indication_ctx.user_data)
++                {
++                    debug!(?redirection, "Server Redirection PDU received");
++                    return Err(ConnectorError::custom("server redirection", redirection));
++                }
+                 let share_control_ctx =
+                     rdp::headers::decode_share_control(send_data_indication_ctx).map_err(ConnectorError::decode)?;
+ 
+diff --git a/crates/ironrdp-connector/src/lib.rs b/crates/ironrdp-connector/src/lib.rs
+index 9a7dabdc..d9332eb0 100644
+--- a/crates/ironrdp-connector/src/lib.rs
++++ b/crates/ironrdp-connector/src/lib.rs
+@@ -10,6 +10,7 @@ mod connection_finalization;
+ pub mod credssp;
+ mod license_exchange;
+ mod server_name;
++pub mod server_redirection;
+ 
+ use core::any::Any;
+ use core::fmt;
+diff --git a/crates/ironrdp-connector/src/server_redirection.rs b/crates/ironrdp-connector/src/server_redirection.rs
+new file mode 100644
+index 00000000..47f5ddf3
+--- /dev/null
++++ b/crates/ironrdp-connector/src/server_redirection.rs
+@@ -0,0 +1,256 @@
++//! Server Redirection PDU ([MS-RDPBCGR] 2.2.13), sent by an RD Connection Broker in place of the
++//! Server Demand Active PDU to send the client to the session host that should serve it.
++//!
++//! The connector does not reconnect by itself: it stops with a [`ConnectorError`] whose source is a
++//! [`ServerRedirection`], and the caller opens a new connection following the same rules as FreeRDP
++//! (`rdp_client_redirect` / `rdp_redirection_apply_settings`).
++
++use core::fmt;
++
++
++pub const LB_TARGET_NET_ADDRESS: u32 = 0x0000_0001;
++pub const LB_LOAD_BALANCE_INFO: u32 = 0x0000_0002;
++pub const LB_USERNAME: u32 = 0x0000_0004;
++pub const LB_DOMAIN: u32 = 0x0000_0008;
++pub const LB_PASSWORD: u32 = 0x0000_0010;
++pub const LB_NOREDIRECT: u32 = 0x0000_0080;
++pub const LB_TARGET_FQDN: u32 = 0x0000_0100;
++pub const LB_TARGET_NETBIOS_NAME: u32 = 0x0000_0200;
++pub const LB_TARGET_NET_ADDRESSES: u32 = 0x0000_0800;
++pub const LB_CLIENT_TSV_URL: u32 = 0x0000_1000;
++pub const LB_REDIRECTION_GUID: u32 = 0x0000_8000;
++pub const LB_TARGET_CERTIFICATE: u32 = 0x0001_0000;
++
++/// Share Control PDU type of the (Enhanced Security) Server Redirection PDU.
++const PDUTYPE_SERVER_REDIR_PKT: u16 = 0x000A;
++
++/// Parsed RDP_SERVER_REDIRECTION_PACKET.
++#[derive(Clone, PartialEq, Eq, Default)]
++pub struct ServerRedirection {
++    pub session_id: u32,
++    pub flags: u32,
++    pub target_net_address: Option<String>,
++    /// Routing token for the next X.224 Connection Request (e.g. `Cookie: msts=...`).
++    pub load_balance_info: Option<Vec<u8>>,
++    pub username: Option<String>,
++    pub domain: Option<String>,
++    pub target_fqdn: Option<String>,
++    pub target_netbios_name: Option<String>,
++    pub target_net_addresses: Vec<String>,
++}
++
++// Never print the routing token or anything credential-like in logs.
++impl fmt::Debug for ServerRedirection {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("ServerRedirection")
++            .field("session_id", &self.session_id)
++            .field("flags", &format_args!("{:#x}", self.flags))
++            .field("has_target_net_address", &self.target_net_address.is_some())
++            .field("has_load_balance_info", &self.load_balance_info.is_some())
++            .field("has_target_fqdn", &self.target_fqdn.is_some())
++            .finish_non_exhaustive()
++    }
++}
++
++impl fmt::Display for ServerRedirection {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        write!(f, "server redirection (session {}, flags {:#x})", self.session_id, self.flags)
++    }
++}
++
++impl core::error::Error for ServerRedirection {}
++
++impl ServerRedirection {
++    /// Host the client should connect to next, following FreeRDP: with a new load-balancing token
++    /// the client goes back to the original address (`None`); otherwise FQDN, then IP, then NetBIOS.
++    ///
++    /// `prefer_address` ignores that rule and returns the explicit address anyway (used when a broker
++    /// that is not behind a load balancer redirects again to the same place).
++    pub fn target_host(&self, prefer_address: bool) -> Option<&str> {
++        if self.load_balance_info.is_some() && !prefer_address {
++            return None;
++        }
++        self.target_fqdn
++            .as_deref()
++            .or(self.target_net_address.as_deref())
++            .or_else(|| self.target_net_addresses.first().map(String::as_str))
++            .or(self.target_netbios_name.as_deref())
++            .filter(|host: &&str| !host.is_empty())
++    }
++
++    /// Routing token as printable ASCII without the trailing CRLF, if it is representable.
++    pub fn routing_token(&self) -> Option<String> {
++        let bytes = self.load_balance_info.as_deref()?;
++        let bytes = bytes.strip_suffix(b"\r\n").unwrap_or(bytes);
++        let bytes = bytes.strip_suffix(b"\0").unwrap_or(bytes);
++        (!bytes.is_empty() && bytes.iter().all(|b| (0x20..=0x7E).contains(b)))
++            .then(|| String::from_utf8_lossy(bytes).into_owned())
++    }
++}
++
++/// Parses a Server Redirection PDU from the MCS user data of a Send Data Indication, if that is what
++/// it is. Returns `None` for any other Share Control PDU (or malformed data), so callers fall back to
++/// their normal decoding.
++pub fn parse_server_redirection(user_data: &[u8]) -> Option<ServerRedirection> {
++    let mut r = Reader(user_data);
++    let _total_length = r.u16()?;
++    let pdu_type = r.u16()?;
++    if pdu_type & 0x000F != PDUTYPE_SERVER_REDIR_PKT {
++        return None;
++    }
++    let _pdu_source = r.u16()?;
++    r.skip(2)?; // pad2Octets
++
++    let _flags = r.u16()?; // SEC_REDIRECTION_PKT
++    let _length = r.u16()?;
++    let session_id = r.u32()?;
++    let flags = r.u32()?;
++    let mut redirection = ServerRedirection {
++        session_id,
++        flags,
++        ..ServerRedirection::default()
++    };
++
++    if flags & LB_TARGET_NET_ADDRESS != 0 {
++        redirection.target_net_address = Some(r.unicode()?);
++    }
++    if flags & LB_LOAD_BALANCE_INFO != 0 {
++        redirection.load_balance_info = Some(r.blob()?.to_vec());
++    }
++    if flags & LB_USERNAME != 0 {
++        redirection.username = Some(r.unicode()?);
++    }
++    if flags & LB_DOMAIN != 0 {
++        redirection.domain = Some(r.unicode()?);
++    }
++    if flags & LB_PASSWORD != 0 {
++        r.blob()?; // redirection password cookie: not used (NLA re-authenticates with the user credentials)
++    }
++    if flags & LB_TARGET_FQDN != 0 {
++        redirection.target_fqdn = Some(r.unicode()?);
++    }
++    if flags & LB_TARGET_NETBIOS_NAME != 0 {
++        redirection.target_netbios_name = Some(r.unicode()?);
++    }
++    if flags & LB_CLIENT_TSV_URL != 0 {
++        r.blob()?;
++    }
++    if flags & LB_REDIRECTION_GUID != 0 {
++        r.blob()?;
++    }
++    if flags & LB_TARGET_CERTIFICATE != 0 {
++        r.blob()?;
++    }
++    if flags & LB_TARGET_NET_ADDRESSES != 0 {
++        let _length = r.u32()?;
++        let count = r.u32()?;
++        for _ in 0..count.min(32) {
++            redirection.target_net_addresses.push(r.unicode()?);
++        }
++    }
++    Some(redirection)
++}
++
++struct Reader<'a>(&'a [u8]);
++
++impl<'a> Reader<'a> {
++    fn take(&mut self, n: usize) -> Option<&'a [u8]> {
++        if self.0.len() < n {
++            return None;
++        }
++        let (head, tail) = self.0.split_at(n);
++        self.0 = tail;
++        Some(head)
++    }
++
++    fn skip(&mut self, n: usize) -> Option<()> {
++        self.take(n).map(|_| ())
++    }
++
++    fn u16(&mut self) -> Option<u16> {
++        self.take(2).map(|b| u16::from_le_bytes([b[0], b[1]]))
++    }
++
++    fn u32(&mut self) -> Option<u32> {
++        self.take(4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
++    }
++
++    fn blob(&mut self) -> Option<&'a [u8]> {
++        let length = usize::try_from(self.u32()?).ok()?;
++        if length > 64 * 1024 {
++            return None;
++        }
++        self.take(length)
++    }
++
++    /// Length-prefixed UTF-16LE string, usually null-terminated.
++    fn unicode(&mut self) -> Option<String> {
++        let bytes = self.blob()?;
++        let units: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
++        let end = units.iter().position(|&u| u == 0).unwrap_or(units.len());
++        String::from_utf16(&units[..end]).ok()
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn unicode(s: &str) -> Vec<u8> {
++        let mut out: Vec<u8> = s.encode_utf16().chain([0]).flat_map(u16::to_le_bytes).collect();
++        let mut framed = u32::try_from(out.len()).unwrap().to_le_bytes().to_vec();
++        framed.append(&mut out);
++        framed
++    }
++
++    fn packet(flags: u32, fields: &[Vec<u8>]) -> Vec<u8> {
++        let body: Vec<u8> = fields.concat();
++        let mut pdu = Vec::new();
++        pdu.extend_from_slice(&0u16.to_le_bytes()); // totalLength (not checked)
++        pdu.extend_from_slice(&(0x10u16 | PDUTYPE_SERVER_REDIR_PKT).to_le_bytes());
++        pdu.extend_from_slice(&1002u16.to_le_bytes());
++        pdu.extend_from_slice(&[0, 0]);
++        pdu.extend_from_slice(&0x0400u16.to_le_bytes());
++        pdu.extend_from_slice(&0u16.to_le_bytes());
++        pdu.extend_from_slice(&7u32.to_le_bytes());
++        pdu.extend_from_slice(&flags.to_le_bytes());
++        pdu.extend_from_slice(&body);
++        pdu
++    }
++
++    #[test]
++    fn token_redirection_goes_back_to_the_original_address() {
++        let token = b"Cookie: msts=3640205228.15629.0000\r\n".to_vec();
++        let mut lb = u32::try_from(token.len()).unwrap().to_le_bytes().to_vec();
++        lb.extend_from_slice(&token);
++        let pdu = packet(
++            LB_TARGET_NET_ADDRESS | LB_LOAD_BALANCE_INFO | LB_USERNAME | LB_DOMAIN | LB_TARGET_FQDN,
++            &[unicode("10.0.0.20"), lb, unicode("usuario"), unicode("EMPRESA"), unicode("rdsh01.empresa.local")],
++        );
++        let r = parse_server_redirection(&pdu).expect("redirection");
++        assert_eq!(r.session_id, 7);
++        assert_eq!(r.target_net_address.as_deref(), Some("10.0.0.20"));
++        assert_eq!(r.username.as_deref(), Some("usuario"));
++        assert_eq!(r.domain.as_deref(), Some("EMPRESA"));
++        assert_eq!(r.target_fqdn.as_deref(), Some("rdsh01.empresa.local"));
++        assert_eq!(r.routing_token().as_deref(), Some("Cookie: msts=3640205228.15629.0000"));
++        assert_eq!(r.target_host(false), None);
++        assert_eq!(r.target_host(true), Some("rdsh01.empresa.local"));
++    }
++
++    #[test]
++    fn address_redirection_prefers_fqdn_then_ip() {
++        let pdu = packet(LB_TARGET_NET_ADDRESS | LB_TARGET_FQDN, &[unicode("10.0.0.20"), unicode("rdsh01.empresa.local")]);
++        assert_eq!(parse_server_redirection(&pdu).unwrap().target_host(false), Some("rdsh01.empresa.local"));
++        let pdu = packet(LB_TARGET_NET_ADDRESS, &[unicode("10.0.0.21")]);
++        assert_eq!(parse_server_redirection(&pdu).unwrap().target_host(false), Some("10.0.0.21"));
++    }
++
++    #[test]
++    fn other_share_control_pdus_are_not_redirections() {
++        let mut demand_active = packet(0, &[]);
++        demand_active[2] = 0x11; // DemandActivePdu
++        assert!(parse_server_redirection(&demand_active).is_none());
++        assert!(parse_server_redirection(&[1, 2, 3]).is_none());
++    }
++}
 diff --git a/crates/ironrdp-session/src/active_stage.rs b/crates/ironrdp-session/src/active_stage.rs
 index f53e0aed..31539417 100644
 --- a/crates/ironrdp-session/src/active_stage.rs
@@ -1218,7 +1511,7 @@ index 00000000..f0ce1d32
 +}
 +
 diff --git a/crates/ironrdp-web/src/session.rs b/crates/ironrdp-web/src/session.rs
-index 4a6ed6b5..906190bf 100644
+index 4a6ed6b5..3a16535c 100644
 --- a/crates/ironrdp-web/src/session.rs
 +++ b/crates/ironrdp-web/src/session.rs
 @@ -13,6 +13,9 @@ use futures_util::{AsyncWriteExt as _, FutureExt as _, StreamExt as _, select};
@@ -1269,32 +1562,203 @@ index 4a6ed6b5..906190bf 100644
              |enable_server_pointer: bool| { self.0.borrow_mut().enable_server_pointer = enable_server_pointer };
              |legacy_graphics: bool| { self.0.borrow_mut().legacy_graphics = legacy_graphics };
              |outbound_message_size_limit: f64| {
-@@ -434,6 +454,15 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+@@ -422,20 +442,34 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+ 
+         info!("Connect to RDP host");
+ 
+-        let mut config = build_config(
+-            username,
+-            password,
+-            server_domain,
+-            client_name.clone(),
+-            desktop_size,
+-            legacy_graphics,
+-        );
+-
          let enable_credssp = self.0.borrow().enable_credssp;
-         config.enable_credssp = enable_credssp;
- 
-+        let remote_app = self.0.borrow().remote_app.clone();
-+        let load_balance_info = self.0.borrow().load_balance_info.clone();
-+        config.remote_application_mode = remote_app.is_some();
-+        // Como o mstsc/FreeRDP: o programa também vai como alternate shell no Client Info.
-+        if let Some(execute) = &remote_app {
-+            config.alternate_shell = execute.executable.clone();
-+            config.work_dir = execute.working_directory.clone();
-+        }
-+
+-        config.enable_credssp = enable_credssp;
+-
          let enable_server_pointer = self.0.borrow().enable_server_pointer;
-         config.enable_server_pointer = enable_server_pointer;
+-        config.enable_server_pointer = enable_server_pointer;
++        let remote_app = self.0.borrow().remote_app.clone();
++        let mut load_balance_info = self.0.borrow().load_balance_info.clone();
++
++        // Destino, usuário, domínio e token podem mudar se um RD Connection Broker redirecionar a
++        // sessão para outro servidor da coleção (ver ironrdp_connector::server_redirection).
++        let (mut username, mut server_domain, mut destination) = (username, server_domain, destination);
++        let mut redirected_session_id: Option<u32> = None;
++        let build = |username: String, server_domain: Option<String>| {
++            let mut config = build_config(
++                username,
++                password.clone(),
++                server_domain,
++                client_name.clone(),
++                desktop_size,
++                legacy_graphics,
++            );
++            config.enable_credssp = enable_credssp;
++            config.enable_server_pointer = enable_server_pointer;
++            config.remote_application_mode = remote_app.is_some();
++            // Como o mstsc/FreeRDP: o programa também vai como alternate shell no Client Info.
++            if let Some(execute) = &remote_app {
++                config.alternate_shell = execute.executable.clone();
++                config.work_dir = execute.working_directory.clone();
++            }
++            config
++        };
  
-@@ -524,6 +553,8 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
-             computer_name: client_name.clone(),
-             use_display_control,
-             input_events_tx: input_events_tx.clone(),
-+            remote_app,
-+            load_balance_info,
-         })
-         .await?;
+         let (input_events_tx, input_events_rx) = mpsc::unbounded();
  
-@@ -709,6 +740,7 @@ impl iron_remote_desktop::Session for Session {
+@@ -466,7 +500,7 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+         // registered via extension(). Backend is Send (holds the mpsc proxy
+         // only) and goes into the SVC processor below; the front-end
+         // `WasmPrinter` owns the JS callbacks and lives on `Session`.
+-        let (printer_backend, printer) = match print_job_stream_callbacks {
++        let (mut printer_backend, printer) = match print_job_stream_callbacks {
+             Some(callbacks) => {
+                 let (backend, printer) = wasm_printer_pair(input_events_tx.clone(), callbacks);
+                 (Some(backend), Some(printer))
+@@ -480,52 +514,97 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+         let printer_name = printer_name.unwrap_or_else(|| "IronRDP Virtual Printer".to_owned());
+         let printer_driver_name = printer_driver_name.unwrap_or_else(default_printer_driver_name);
+ 
+-        let ws = WebSocket::open(&proxy_address).context("couldn't open WebSocket")?;
+-
+-        // NOTE: ideally, when the WebSocket can't be opened, the above call should fail with details on why is that
+-        // (e.g., the proxy hostname could not be resolved, proxy service is not running), but errors are neved
+-        // bubbled up in practice, so instead we poll the WebSocket state until we know its connected (i.e., the
+-        // WebSocket handshake is a success and user data can be exchanged).
+-        loop {
+-            match ws.state() {
+-                websocket::State::Closing | websocket::State::Closed => {
+-                    return Err(IronError::from(anyhow::anyhow!(
+-                        "failed to connect to {proxy_address} (WebSocket is `{:?}`)",
+-                        ws.state()
+-                    ))
+-                    .with_kind(IronErrorKind::ProxyConnect));
+-                }
+-                websocket::State::Connecting => {
+-                    trace!("WebSocket is connecting to proxy at {proxy_address}...");
+-                    gloo_timers::future::sleep(Duration::from_millis(50)).await;
+-                }
+-                websocket::State::Open => {
+-                    debug!("WebSocket connected to {proxy_address} with success");
+-                    break;
++        let use_display_control = self.0.borrow().use_display_control;
++        let original_port = destination
++            .rsplit_once(':')
++            .and_then(|(_, port)| port.parse::<u16>().ok())
++            .unwrap_or(3389);
++        let mut redirects = 0;
++
++        let (connection_result, ws) = loop {
++            let ws = WebSocket::open(&proxy_address).context("couldn't open WebSocket")?;
++
++            // NOTE: ideally, when the WebSocket can't be opened, the above call should fail with details on why is that
++            // (e.g., the proxy hostname could not be resolved, proxy service is not running), but errors are neved
++            // bubbled up in practice, so instead we poll the WebSocket state until we know its connected (i.e., the
++            // WebSocket handshake is a success and user data can be exchanged).
++            loop {
++                match ws.state() {
++                    websocket::State::Closing | websocket::State::Closed => {
++                        return Err(IronError::from(anyhow::anyhow!(
++                            "failed to connect to {proxy_address} (WebSocket is `{:?}`)",
++                            ws.state()
++                        ))
++                        .with_kind(IronErrorKind::ProxyConnect));
++                    }
++                    websocket::State::Connecting => {
++                        trace!("WebSocket is connecting to proxy at {proxy_address}...");
++                        gloo_timers::future::sleep(Duration::from_millis(50)).await;
++                    }
++                    websocket::State::Open => {
++                        debug!("WebSocket connected to {proxy_address} with success");
++                        break;
++                    }
+                 }
+             }
+-        }
+ 
+-        let use_display_control = self.0.borrow().use_display_control;
++            let redirection = Rc::new(RefCell::new(None));
++            let result = connect(ConnectParams {
++                ws,
++                config: build(username.clone(), server_domain.clone()),
++                proxy_auth_token: auth_token.clone(),
++                destination: destination.clone(),
++                pcb: pcb.clone(),
++                vmconnect: vmconnect.clone(),
++                kdc_proxy_url: kdc_proxy_url.clone(),
++                clipboard_backend: clipboard.as_ref().map(|clip| clip.backend()),
++                printer_backend: printer_backend.take(),
++                printer_device_id,
++                printer_name: printer_name.clone(),
++                printer_driver_name: printer_driver_name.clone(),
++                computer_name: client_name.clone(),
++                use_display_control,
++                input_events_tx: input_events_tx.clone(),
++                remote_app: remote_app.clone(),
++                load_balance_info: load_balance_info.clone(),
++                redirected_session_id,
++                redirection: Rc::clone(&redirection),
++            })
++            .await;
+ 
+-        let (connection_result, ws) = connect(ConnectParams {
+-            ws,
+-            config,
+-            proxy_auth_token: auth_token,
+-            destination,
+-            pcb,
+-            vmconnect,
+-            kdc_proxy_url,
+-            clipboard_backend: clipboard.as_ref().map(|clip| clip.backend()),
+-            printer_backend,
+-            printer_device_id,
+-            printer_name,
+-            printer_driver_name,
+-            computer_name: client_name.clone(),
+-            use_display_control,
+-            input_events_tx: input_events_tx.clone(),
+-        })
+-        .await?;
++            let error = match result {
++                Ok(done) => break done,
++                Err(error) => error,
++            };
++            let Some(target) = redirection.borrow_mut().take() else {
++                return Err(error);
++            };
++            redirects += 1;
++            if redirects > 3 {
++                return Err(IronError::from(anyhow::anyhow!(
++                    "o servidor redirecionou a sessão mais de 3 vezes"
++                )));
++            }
++            // 1º redirecionamento: regras do FreeRDP (com token novo, volta ao endereço original levando
++            // o token; sem token, vai ao FQDN/IP indicado). Se o Broker redirecionar de novo, ele não
++            // está atrás de um balanceador: vai direto ao endereço indicado, levando o token.
++            if let Some(host) = target.target_host(redirects > 1) {
++                destination = if host.contains(':') {
++                    format!("[{host}]:{original_port}")
++                } else {
++                    format!("{host}:{original_port}")
++                };
++            }
++            load_balance_info = target.routing_token();
++            redirected_session_id = Some(target.session_id);
++            if let Some(name) = target.username.clone().filter(|name| !name.is_empty()) {
++                username = name;
++            }
++            if let Some(domain) = target.domain.clone().filter(|domain| !domain.is_empty()) {
++                server_domain = Some(domain);
++            }
++            info!(redirects, ?target, "Connection Broker redirected the session; reconnecting");
++        };
+ 
+         info!("Connected!");
+ 
+@@ -709,6 +788,7 @@ impl iron_remote_desktop::Session for Session {
          let activation_factory = connection_result.activation_factory;
  
          let mut active_stage = ActiveStageBuilder {
@@ -1302,7 +1766,7 @@ index 4a6ed6b5..906190bf 100644
              static_channels: connection_result.static_channels,
              user_channel_id: connection_result.user_channel_id,
              io_channel_id: connection_result.io_channel_id,
-@@ -947,6 +979,34 @@ impl iron_remote_desktop::Session for Session {
+@@ -947,6 +1027,34 @@ impl iron_remote_desktop::Session for Session {
                  }
              };
  
@@ -1337,7 +1801,7 @@ index 4a6ed6b5..906190bf 100644
              // `process()` may have resized `image` to follow ResetGraphics in the same
              // frame. The canvas has to match *before* the GraphicsUpdate from that frame
              // is drawn.
-@@ -1099,7 +1159,7 @@ impl iron_remote_desktop::Session for Session {
+@@ -1099,7 +1207,7 @@ impl iron_remote_desktop::Session for Session {
                              if let ConnectionActivationState::Finalized {
                                  desktop_size,
                                  share_id,
@@ -1346,7 +1810,7 @@ index 4a6ed6b5..906190bf 100644
                                  enable_server_pointer,
                                  pointer_software_rendering,
                                  static_channel_chunk_size,
-@@ -1129,6 +1189,7 @@ impl iron_remote_desktop::Session for Session {
+@@ -1129,6 +1237,7 @@ impl iron_remote_desktop::Session for Session {
                                  ) {
                                      return Err(IronError::from(anyhow::anyhow!("invalid static channel chunk size")));
                                  }
@@ -1354,7 +1818,7 @@ index 4a6ed6b5..906190bf 100644
                                  active_stage.set_window_support_level(window_support_level);
                                  break 'activation_seq;
                              }
-@@ -1193,18 +1254,8 @@ impl iron_remote_desktop::Session for Session {
+@@ -1193,18 +1302,8 @@ impl iron_remote_desktop::Session for Session {
          caps_lock: bool,
          kana_lock: bool,
      ) -> Result<(), Self::Error> {
@@ -1374,26 +1838,32 @@ index 4a6ed6b5..906190bf 100644
      }
  
      fn shutdown(&self) -> Result<(), Self::Error> {
-@@ -1675,6 +1726,9 @@ struct ConnectParams {
+@@ -1675,6 +1774,13 @@ struct ConnectParams {
      use_display_control: bool,
      /// Lets the EGFX handler report server-driven desktop resizes to the event loop.
      input_events_tx: mpsc::UnboundedSender<RdpInputEvent>,
 +    /// Programa RemoteApp: liga o canal RAIL e fica na fila até o handshake do servidor.
 +    remote_app: Option<rail_pdu::ExecutePdu>,
 +    load_balance_info: Option<String>,
++    /// Sessão indicada pelo Connection Broker ao redirecionar (vai no GCC Client Cluster Data).
++    redirected_session_id: Option<u32>,
++    /// Preenchido quando o servidor responde com um Server Redirection PDU.
++    redirection: Rc<RefCell<Option<connector::server_redirection::ServerRedirection>>>,
  }
  
  fn default_printer_driver_name() -> String {
-@@ -1726,6 +1780,8 @@ async fn connect(
+@@ -1726,6 +1832,10 @@ async fn connect(
          computer_name,
          use_display_control,
          input_events_tx,
 +        remote_app,
 +        load_balance_info,
++        redirected_session_id,
++        redirection,
      }: ConnectParams,
  ) -> Result<(connector::ConnectionResult, WebSocket), IronError> {
      let mut framed = ironrdp_futures::LocalFuturesFramed::new(ws);
-@@ -1733,7 +1789,23 @@ async fn connect(
+@@ -1733,7 +1843,38 @@ async fn connect(
      // In web browser environments, we do not have an easy access to the local address of the socket.
      let dummy_client_addr = core::net::SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 33899));
  
@@ -1406,7 +1876,22 @@ index 4a6ed6b5..906190bf 100644
 +        }
 +        None => None,
 +    };
++    let advertise_redirection =
++        config.remote_application_mode || load_balance_info.is_some() || redirected_session_id.is_some();
      let mut connector = ClientConnector::new(config, dummy_client_addr);
++    // Avisa que o cliente aceita ser redirecionado (como o mstsc), para o Connection Broker poder
++    // mandar a sessão ao servidor da coleção; só em RemoteApp/Broker, sem mudar o RDP comum.
++    if advertise_redirection {
++        let mut flags = ironrdp::pdu::gcc::RedirectionFlags::REDIRECTION_SUPPORTED;
++        if redirected_session_id.is_some() {
++            flags |= ironrdp::pdu::gcc::RedirectionFlags::REDIRECTED_SESSION_FIELD_VALID;
++        }
++        connector = connector.with_cluster_data(ironrdp::pdu::gcc::ClientClusterData {
++            flags,
++            redirection_version: ironrdp::pdu::gcc::RedirectionVersion::V6,
++            redirected_session_id: redirected_session_id.unwrap_or(0),
++        });
++    }
 +    if let Some(rail) = rail_client {
 +        connector.attach_static_channel(rail);
 +    }
@@ -1417,6 +1902,39 @@ index 4a6ed6b5..906190bf 100644
  
      if let Some(clipboard_backend) = clipboard_backend {
          connector.attach_static_channel(CliprdrClient::new(Box::new(clipboard_backend)));
+@@ -1818,7 +1959,7 @@ async fn connect(
+     )
+     .await?;
+ 
+-    let connection_result = ironrdp_futures::connect_finalize(
++    let connection_result = match ironrdp_futures::connect_finalize(
+         upgraded,
+         connector,
+         &mut framed,
+@@ -1827,7 +1968,22 @@ async fn connect(
+         server_public_key,
+         kerberos_config,
+     )
+-    .await?;
++    .await
++    {
++        Ok(result) => result,
++        Err(error) => {
++            // Redirecionamento do Connection Broker: devolve os dados para o chamador reconectar.
++            let mut source = core::error::Error::source(&error);
++            while let Some(inner) = source {
++                if let Some(target) = inner.downcast_ref::<connector::server_redirection::ServerRedirection>() {
++                    *redirection.borrow_mut() = Some(target.clone());
++                    break;
++                }
++                source = inner.source();
++            }
++            return Err(error.into());
++        }
++    };
+ 
+     let ws = framed.into_inner_no_leftover();
+ 
 diff --git a/crates/ironrdp/examples/rdp_stress.rs b/crates/ironrdp/examples/rdp_stress.rs
 index ee45471b..d9962f47 100644
 --- a/crates/ironrdp/examples/rdp_stress.rs
