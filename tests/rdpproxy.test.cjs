@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { WebSocket, WebSocketServer } = require('ws');
-const { parseDestination, parseRDCleanPathRequest, handleConnection } = require('../src/rdpproxy.cjs');
+const { parseDestination, parseRDCleanPathRequest, handleConnection, explainFailure } = require('../src/rdpproxy.cjs');
 
 test('parseDestination: host:porta, IPv6 e porta padrão 3389', () => {
   assert.deepEqual(parseDestination('192.168.1.10:3390'), { host: '192.168.1.10', port: 3390 });
@@ -28,4 +28,12 @@ test('handleConnection: mensagem inválida gera resposta de erro e fecha a conex
   assert.ok(Buffer.isBuffer(response) && response.length > 0, 'deve responder com um PDU de erro, não travar em silêncio');
   await closed;
   wss.close();
+});
+
+test('falhas do proxy viram mensagens claras em português', () => {
+  assert.match(explainFailure('Falha na conexão TCP: connect ECONNREFUSED 10.0.0.1:3389'), /recusada/);
+  assert.match(explainFailure('Tempo limite ao conectar por RDP.'), /tempo esgotado/);
+  assert.match(explainFailure('Falha na conexão TCP: getaddrinfo ENOTFOUND servidor'), /DNS/);
+  assert.match(explainFailure('Handshake TLS falhou: error:1000012e:SSL routines:OPENSSL_internal:KEY_USAGE_BIT_INCORRECT'), /Key Usage/);
+  assert.equal(explainFailure('algo inesperado'), 'algo inesperado');
 });

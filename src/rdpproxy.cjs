@@ -114,7 +114,22 @@ function certChainOf(tlsSocket) {
   }
   return chain;
 }
+// O certificado que o Windows gera para o RDP costuma ter Key Usage só "Key Encipherment" (sem
+// "Digital Signature"). O BoringSSL do Electron recusa esse certificado numa troca de chaves ECDHE ou
+// no TLS 1.3 (KEY_USAGE_BIT_INCORRECT), mesmo com rejectUnauthorized:false — o Schannel do mstsc
+// tolera. Nesse caso refazemos a conexão em TLS 1.2 só com troca de chaves RSA, que usa exatamente o
+// "Key Encipherment" que o certificado declara.
+const RSA_KEY_EXCHANGE = { maxVersion: 'TLSv1.2', ciphers: 'AES256-GCM-SHA384:AES128-GCM-SHA256:AES256-SHA:AES128-SHA' };
 async function performRDPHandshake(host, port, x224Request, options = {}) {
+  try { return await connectRDP(host, port, x224Request, options, {}); }
+  catch (error) {
+    if (!/KEY_USAGE_BIT_INCORRECT/.test(error.message)) throw error;
+    log(`${host}:${port}: certificado sem "Digital Signature" no Key Usage — tentando de novo com troca de chaves RSA (TLS 1.2).`);
+    try { return await connectRDP(host, port, x224Request, options, RSA_KEY_EXCHANGE); }
+    catch (retry) { throw new Error(`KEY_USAGE_BIT_INCORRECT; a alternativa com troca de chaves RSA também falhou: ${retry.message}`); }
+  }
+}
+async function connectRDP(host, port, x224Request, options, tlsOptions) {
   const tcpSocket = await new Promise((resolve, reject) => {
     const socket = net.createConnection({ host, port }, () => { socket.write(x224Request); resolve(socket); });
     socket.once('error', error => reject(new Error(`Falha na conexão TCP: ${error.message}`)));
@@ -135,12 +150,12 @@ async function performRDPHandshake(host, port, x224Request, options = {}) {
       // o contexto TLS, por isso o try/catch aqui, não só o listener de 'error').
       let tlsSocket;
       try {
-        tlsSocket = tls.connect({ socket: tcpSocket, rejectUnauthorized: false, minVersion: 'TLSv1' }, () => {
+        tlsSocket = tls.connect({ socket: tcpSocket, rejectUnauthorized: false, minVersion: 'TLSv1', ...tlsOptions }, () => {
           tcpSocket.setTimeout(0); tcpSocket.setNoDelay(true); tcpSocket.setKeepAlive(true, 10000);
           settle(null, { x224Response: Buffer.from(x224Response), certChain: certChainOf(tlsSocket), tlsSocket });
         });
       } catch (error) { tcpSocket.destroy(); settle(new Error(`Configuração de TLS inválida: ${error.message}`)); return; }
-      tlsSocket.once('error', error => settle(new Error(`Handshake TLS falhou: ${error.message}`)));
+      tlsSocket.once('error', error => { tlsSocket.destroy(); tcpSocket.destroy(); settle(new Error(`Handshake TLS falhou: ${error.message}`)); });
     });
     tcpSocket.setTimeout(options.readyTimeout || 15000, () => { tcpSocket.destroy(); settle(new Error('Tempo limite ao conectar por RDP.')); });
   });
@@ -153,6 +168,19 @@ function setupTlsRelay(ws, tlsSocket) {
   tlsSocket.on('end', () => cleanup('servidor encerrou a conexão TLS')); tlsSocket.on('error', e => cleanup('erro de TLS: ' + e.message)); tlsSocket.on('close', hadError => cleanup(hadError ? 'conexão TLS fechada com erro' : 'conexão TLS fechada'));
   ws.on('close', (code, reason) => cleanup(`WebSocket fechado pelo cliente (code=${code}${reason ? ', ' + reason : ''})`)); ws.on('error', e => cleanup('erro de WebSocket: ' + e.message));
 }
+// Última falha por destino: o RDCleanPath só leva ao WASM um código genérico (502), então o renderer
+// pergunta aqui o motivo real para mostrar ao usuário.
+const failures = new Map();
+function explainFailure(message) {
+  if (/KEY_USAGE_BIT_INCORRECT/.test(message)) return 'o certificado do servidor RDP não foi aceito (Key Usage) e o servidor recusou a alternativa com troca de chaves RSA.';
+  if (/ECONNREFUSED/.test(message)) return 'conexão recusada — a porta RDP está fechada ou o serviço não está rodando no servidor.';
+  if (/ENOTFOUND|EAI_AGAIN/.test(message)) return 'nome do servidor não encontrado (DNS). Confira o nome ou use o IP.';
+  if (/Tempo limite|ETIMEDOUT/.test(message)) return 'tempo esgotado — o servidor não respondeu na porta RDP (firewall, VPN desconectada ou servidor desligado).';
+  if (/ECONNRESET|sem responder ao X.224/.test(message)) return 'o servidor ou um firewall no caminho encerrou a conexão logo no início.';
+  if (/Handshake TLS/.test(message)) return 'a negociação de segurança (TLS) com o servidor falhou.';
+  return message;
+}
+function lastFailure(destination) { return failures.get(destination) || null; }
 function handleConnection(ws, options = {}) {
   ws.once('message', async data => {
     let destination = '?';
@@ -161,14 +189,16 @@ function handleConnection(ws, options = {}) {
       destination = request.destination;
       const { host, port } = parseDestination(request.destination);
       const { x224Response, certChain, tlsSocket } = await performRDPHandshake(host, port, request.x224ConnectionRequest, options);
-      log(`OK ${destination}`);
+      log(`OK ${destination}`); failures.delete(destination);
       ws.send(buildRDCleanPathResponse(`${host}:${port}`, x224Response, certChain));
       setupTlsRelay(ws, tlsSocket);
     } catch (error) {
       log(`FALHA ${destination}: ${error.message}`);
+      if (failures.size >= 50) failures.delete(failures.keys().next().value);
+      failures.set(destination, { reason: explainFailure(error.message), detail: error.message, at: Date.now() });
       try { ws.send(buildRDCleanPathError(1, 502)); } catch { /* WS já fechado */ }
       try { ws.close(); } catch { /* já fechado */ }
     }
   });
 }
-module.exports = { handleConnection, parseRDCleanPathRequest, parseDestination };
+module.exports = { handleConnection, parseRDCleanPathRequest, parseDestination, lastFailure, explainFailure };

@@ -21,15 +21,19 @@ function buildRDCleanPathRequest(destination, x224Bytes) {
   return derWrap(0x30, Buffer.concat(parts));
 }
 
-test('handshake completo: TCP + X.224 + TLS + relay bidirecional', async () => {
+function selfSigned(extensions) {
   const keys = forge.pki.rsa.generateKeyPair(2048);
   const cert = forge.pki.createCertificate();
   cert.publicKey = keys.publicKey; cert.serialNumber = '01';
   cert.validity.notBefore = new Date(); cert.validity.notAfter = new Date(Date.now() + 3600000);
   const attrs = [{ name: 'commonName', value: 'rdp-lab' }];
   cert.setSubject(attrs); cert.setIssuer(attrs);
-  cert.sign(keys.privateKey);
-  const pem = { cert: forge.pki.certificateToPem(cert), key: forge.pki.privateKeyToPem(keys.privateKey) };
+  if (extensions) cert.setExtensions(extensions);
+  cert.sign(keys.privateKey, forge.md.sha256.create());
+  return { cert: forge.pki.certificateToPem(cert), key: forge.pki.privateKeyToPem(keys.privateKey) };
+}
+
+async function handshakeAndEcho(pem) {
 
   const rdpServer = net.createServer(socket => {
     socket.once('data', () => {
@@ -66,4 +70,16 @@ test('handshake completo: TCP + X.224 + TLS + relay bidirecional', async () => {
   assert.equal(echo.toString(), 'eco:OLA_DENTRO_DO_TLS', 'o texto deve ir cifrado até o servidor fake, ser ecoado, e voltar decifrado até o cliente WS');
 
   client.close(); wss.close(); rdpServer.close();
-});
+}
+
+test('handshake completo: TCP + X.224 + TLS + relay bidirecional', () => handshakeAndEcho(selfSigned()));
+
+// Certificado igual ao que o próprio Windows gera para o RDP: Key Usage só "Key Encipherment, Data
+// Encipherment", sem "Digital Signature". O BoringSSL do Electron recusa esse certificado numa troca
+// de chaves ECDHE/TLS 1.3 (KEY_USAGE_BIT_INCORRECT) mesmo com rejectUnauthorized:false — o proxy
+// precisa conectar mesmo assim, como o mstsc. Só reproduz rodando no Node do Electron
+// (ELECTRON_RUN_AS_NODE=1 electron --test ...); no Node comum (OpenSSL) passa de qualquer jeito.
+test('certificado RDP do Windows (Key Usage só Key Encipherment) conecta', () => handshakeAndEcho(selfSigned([
+  { name: 'keyUsage', critical: true, keyEncipherment: true, dataEncipherment: true },
+  { name: 'extKeyUsage', serverAuth: true },
+])));

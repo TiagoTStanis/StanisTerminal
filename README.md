@@ -6,7 +6,7 @@ O projeto se inspira no uso de sessões do MobaXterm e do WindTerm. É um aplica
 
 ## Para usar
 
-Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.9.0-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
+Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.9.1-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
 
 **Evite a versão de arquivo único** (`StanisTerminal-*-win-x64-PORTATIL-LENTO-usar-o-zip.exe`): ela extrai os componentes a cada execução — não só na primeira — e pode levar mais de um minuto toda vez que você abrir. Use-a apenas para testar rapidamente em um computador onde você não vai instalar nada; para uso do dia a dia, use sempre o ZIP extraído. Não precisa instalar Node.js, Python ou Electron em nenhuma das distribuições. Use Windows 10/11 de 64 bits e uma pasta em que você possa salvar arquivos, como Documentos. Consulte os arquivos já publicados em [Releases](https://github.com/TiagoTStanis/StanisTerminal/releases); gerar um pacote local não o publica automaticamente. Para arquivos publicados, confira o SHA-256 e a assinatura GPG do release (veja [como verificar](docs/VERIFICAR-ASSINATURA.md); impressão digital `A345 44C3 43F2 E16B EF64  C7A4 95A1 3721 ED00 B9E6`).
 
@@ -19,7 +19,12 @@ O [manual de uso](docs/LEIA-ME.md) explica backups, X11, atalhos e mensagens com
 
 ## Recursos
 
-**Novo na 1.9.0 — visual novo, mais área para a sessão:**
+**Novo na 1.9.1 — RDP conecta em servidores Windows reais (correção importante):**
+- Em servidores Windows a conexão falhava com `RDCleanPath error (code 1) / HTTP 502`. O registro mostrava `Handshake TLS falhou: KEY_USAGE_BIT_INCORRECT`. **Não era firewall:** o certificado que o Windows gera para o RDP declara a chave só para "Key Encipherment", e a biblioteca TLS do Electron (BoringSSL) recusa esse certificado na negociação moderna (ECDHE/TLS 1.3), mesmo sem validar o certificado. O `mstsc` tolera isso. Agora, quando isso acontece, o Stanis Terminal refaz a conexão em TLS 1.2 com troca de chaves RSA, que usa exatamente o que o certificado permite.
+- **Erro real na tela:** no lugar do "502" genérico, a mensagem diz o motivo: conexão recusada, tempo esgotado (firewall/VPN), nome não encontrado (DNS) ou problema de certificado/TLS.
+- Teste novo `pnpm test:tls`, que roda o handshake no mesmo BoringSSL do Electron, com um certificado igual ao do RDP do Windows.
+
+**Da 1.9.0 — visual novo, mais área para a sessão:**
 - Visual inspirado no Material Design 3 do Google: cores tonais nos temas claro e escuro, cantos e espaçamentos consistentes, abas com indicador, foco visível pelo teclado e tipografia Segoe UI Variable.
 - **Mais espaço para o terminal ou a tela remota:** faixas superiores mais finas, e as abas e as ações da sessão agora dividem uma única faixa. Numa janela de 1424×860, a área útil passou de 1156×710 para 1156×767.
 - **Lateral recolhível** (botão ☰ ou **Ctrl+Shift+B**; o estado é lembrado): a sessão ganha toda a largura. O Ctrl+B continua livre para o tmux e para a sessão remota.

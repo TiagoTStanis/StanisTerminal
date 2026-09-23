@@ -325,7 +325,12 @@ async function openRdp(item, result) {
   builder.setCursorStyleCallbackContext(canvas);
   builder.setCursorStyleCallback(style => { canvas.style.cursor = style || 'default'; });
   try { item.rdpSession = await builder.connect(); }
-  catch (error) { toast('RDP: ' + rdpErrorText(error)); item.ended = true; renderTabs(); return; }
+  catch (error) {
+    // O proxy só repassa um código genérico (502) ao WASM; o motivo real fica guardado no processo principal.
+    const failure = await call('rdp:lastFailure', `${result.profile.host}:${result.profile.port}`).catch(() => null);
+    toast(failure ? `RDP: não foi possível conectar em ${result.profile.host} — ${failure.reason}` : 'RDP: ' + rdpErrorText(error));
+    item.ended = true; renderTabs(); return;
+  }
   const size = item.rdpSession.desktopSize(); canvas.width = size.width; canvas.height = size.height; fit();
   canvas.focus(); toast('RDP conectado.');
   const runInput = (build) => { if (!item.rdpSession) return; const tx = new rdp.InputTransaction(); build(tx); safe(() => item.rdpSession.applyInputs(tx))(); };

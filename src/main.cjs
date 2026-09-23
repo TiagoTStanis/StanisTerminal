@@ -211,6 +211,7 @@ function register() {
   handle('graphics:bounds', (id, bounds) => graphics.bounds(id, bounds));
   handle('graphics:close', id => { const item = graphics.items.get(id); graphics.close(id); if (item) remoteFiles.close(item.profile.id); });
   handle('network:filesOpen', id => { const item = graphics.items.get(id); if (!item) throw new Error('Sessão gráfica não encontrada.'); return remoteFiles.open(item.profile); });
+  handle('rdp:lastFailure', destination => require('./rdpproxy.cjs').lastFailure(String(destination)));
   handle('rdp:log', () => {
     const file = path.join(app.getPath('userData'), 'rdp-proxy.log');
     if (!fs.existsSync(file)) return 'Nenhuma tentativa de conexão RDP registrada ainda.';

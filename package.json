@@ -1,6 +1,6 @@
 {
   "name": "stanis-terminal",
-  "version": "1.9.0",
+  "version": "1.9.1",
   "description": "Terminal local para Windows, sem IA, com sessões e ferramentas de infraestrutura.",
   "main": "src/main.cjs",
   "author": "Tiago Torres Stanis",
@@ -16,6 +16,7 @@
     "build:zip": "node scripts/prepare.cjs && electron-builder --win zip --x64",
     "build:dir": "node scripts/prepare.cjs && electron-builder --win --dir --x64",
     "test:connections": "node tests/connections.cjs",
+    "test:tls": "node tests/electron-tls.cjs",
     "test:extras": "node tests/extras.cjs",
     "test:portable": "node tests/portable.cjs",
     "test:organize": "node tests/organize.cjs",
