@@ -349,3 +349,6 @@ body.no-sessions .workspace-toolbar { display: none !important; }
 .toolbar-sep { width: 1px; height: 16px; background: var(--line-strong); margin: 0 4px; flex-shrink: 0; }
 
 @media (prefers-reduced-motion: reduce) { .sidebar, .graphic-toolbar, #tabs .tab, #exit-focus { transition: none; } }
+/* Status online da sessão: só o fundo do selo muda (verde = a porta responde, vermelho = não responde). */
+.badge.reach-on, :is(.t-dark, .t-dracula, .t-nord, .t-solarized, .t-monokai) .badge.reach-on { background: #1e8e3e; color: #fff; border-color: #1e8e3e; }
+.badge.reach-off, :is(.t-dark, .t-dracula, .t-nord, .t-solarized, .t-monokai) .badge.reach-off { background: #d93025; color: #fff; border-color: #d93025; }

@@ -5,7 +5,8 @@ const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
 const { pathToFileURL } = require('node:url');
-const { Config, profile, groupPath, text, readJSON, writeJSON } = require('./config.cjs');
+const { Config, profile, groupPath, text, host: validHost, port: validPort, readJSON, writeJSON } = require('./config.cjs');
+const net = require('node:net');
 const { SSH } = require('./ssh.cjs');
 const { Sessions } = require('./sessions.cjs');
 const { Files } = require('./files.cjs');
@@ -121,7 +122,8 @@ function register() {
     const previous = config.value.settings || {};
     config.value.settings = { fontSize: Math.max(10, Math.min(28, Number(value.fontSize) || 14)), theme: THEMES.includes(value.theme) ? value.theme : 'light', restoreSessions: value.restoreSessions === undefined ? previous.restoreSessions === true : !!value.restoreSessions, scrollback: Math.max(1000, Math.min(100000, Number(value.scrollback) || 10000)),
       syncFolder: value.syncFolder === undefined ? previous.syncFolder || '' : text(value.syncFolder || '', 2048), autocomplete: value.autocomplete === undefined ? previous.autocomplete !== false : !!value.autocomplete,
-      highlightErrors: value.highlightErrors === undefined ? previous.highlightErrors !== false : !!value.highlightErrors };
+      highlightErrors: value.highlightErrors === undefined ? previous.highlightErrors !== false : !!value.highlightErrors,
+      checkOnline: value.checkOnline === undefined ? previous.checkOnline !== false : !!value.checkOnline };
     config.save(); return config.value.settings;
   });
   handle('macros:save', values => {
@@ -353,6 +355,20 @@ function register() {
     if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Só é permitido abrir links http:// ou https://.');
     const answer = await ask({ title: 'Abrir link no navegador?', message: parsed.toString(), fields: [], accept: 'Abrir' });
     if (answer) await shell.openExternal(parsed.toString());
+  });
+  // Status online das sessões (como o mRemoteNG): só abre uma conexão TCP na porta da sessão e fecha,
+  // sem enviar nada nem autenticar. Poucas por vez, para não parecer varredura a um IPS.
+  handle('network:reachable', async targets => {
+    if (!Array.isArray(targets) || targets.length > 500) throw new Error('Lista de hosts inválida.');
+    const list = targets.map(t => ({ host: validHost(t?.host), port: validPort(t?.port) }));
+    const probe = ({ host, port }) => new Promise(resolve => {
+      const socket = net.connect({ host, port }); let settled = false;
+      const done = ok => { if (settled) return; settled = true; socket.destroy(); resolve(ok); };
+      socket.setTimeout(2500, () => done(false)); socket.once('connect', () => done(true)); socket.once('error', () => done(false));
+    });
+    const results = new Array(list.length); let next = 0;
+    await Promise.all(Array.from({ length: Math.min(8, list.length) }, async () => { while (next < list.length) { const i = next++; results[i] = await probe(list[i]); } }));
+    return results;
   });
   handle('network:portscan', options => network.portScan(options));
   handle('network:wol', options => network.wakeOnLan(options));

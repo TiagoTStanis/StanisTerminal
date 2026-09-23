@@ -175,6 +175,9 @@ function sftpServer(sftp) {
     await page.locator('.tree-row.session .tree-main').filter({ hasText: 'VNC laboratório' }).click(); await page.waitForFunction(() => document.querySelector('#status').textContent === 'VNC conectado.');
     await page.waitForFunction(() => [...document.querySelectorAll('.graphic-mount canvas')].some(canvas => canvas.width === 64 && canvas.height === 64 && canvas.getContext('2d').getImageData(0, 0, 1, 1).data[1] === 160));
     console.log('PASS: VNC negocia RFB, conecta no noVNC e renderiza o framebuffer recebido.');
+    // Status online na lista de sessões: a porta do servidor de laboratório responde, então o selo fica verde.
+    await page.locator('.tree-row.session', { hasText: 'VNC laboratório' }).locator('.badge.reach-on').waitFor({ timeout: 10000 });
+    console.log('PASS: status online: selo da sessão fica verde quando a porta responde.');
     // Clipboard do servidor VNC chega no clipboard do Windows.
     await app.evaluate(({ clipboard }) => clipboard.writeText('')); sendServerCutText('Veio do servidor VNC de laboratório');
     await page.waitForFunction(async () => { const text = await window.api.call('clipboard:read'); return text === 'Veio do servidor VNC de laboratório'; });

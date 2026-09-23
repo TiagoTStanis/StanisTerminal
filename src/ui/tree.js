@@ -20,6 +20,35 @@ export function setupTree(ctx) {
   const persist = () => { try { localStorage.setItem('stanis.collapsed', JSON.stringify([...collapsed])); } catch { /* opcional */ } };
   let dragging = null, menu = null;
 
+  // ---------- Status online (como o mRemoteNG): fundo do selo verde/vermelho conforme a porta responde ----------
+  const PORTS = { rdp: 3389, vnc: 5900, ssh: 22, 'ssh-x11': 22, telnet: 23, rlogin: 513, rsh: 514 };
+  // Sessões locais, seriais ou via gateway SSH/proxy não dá para testar direto: ficam sem cor.
+  const target = p => PORTS[p.type] && p.host && !p.jumpId && !p.proxyHost ? `${p.host}:${p.port || PORTS[p.type]}` : null;
+  const reach = new Map(); let checking = false, lastCheck = 0;
+  function paint(badge, p) {
+    const key = target(p), online = key ? reach.get(key) : undefined;
+    badge.classList.toggle('reach-on', online === true); badge.classList.toggle('reach-off', online === false);
+    if (online !== undefined) badge.title = online ? `Online: ${key} respondendo` : `Offline: ${key} não respondeu`;
+  }
+  // Só pinta os selos já na tela (sem redesenhar a lista): não atrapalha arrastar, renomear nem a rolagem.
+  function repaint() {
+    const byId = new Map(state().config.profiles.map(p => [p.id, p]));
+    for (const row of $('sessions-list').querySelectorAll('.tree-row.session')) { const p = byId.get(row.dataset.id), badge = row.querySelector('.badge'); if (p && badge) paint(badge, p); }
+  }
+  async function checkOnline(force = false) {
+    if (checking) return;
+    if (state().config.settings.checkOnline === false) { if (reach.size) { reach.clear(); repaint(); } return; }
+    if (!force && (!document.hasFocus() || Date.now() - lastCheck < 115000)) return;
+    const keys = [...new Set(state().config.profiles.map(target).filter(Boolean))];
+    if (!keys.length) return;
+    checking = true; lastCheck = Date.now();
+    try {
+      const results = await call('network:reachable', keys.map(key => { const i = key.lastIndexOf(':'); return { host: key.slice(0, i), port: Number(key.slice(i + 1)) }; }));
+      keys.forEach((key, i) => reach.set(key, results[i])); repaint();
+    } catch { /* o status é só informativo */ } finally { checking = false; }
+  }
+  setInterval(() => checkOnline(), 20000); setTimeout(() => checkOnline(true), 1500);
+
   // ---------- Menu de contexto (itens perigosos pedem o segundo clique no próprio item) ----------
   function closeMenu() { menu?.remove(); menu = null; }
   function openMenu(x, y, items) {
@@ -86,7 +115,8 @@ export function setupTree(ctx) {
     const row = elem('div', '', 'tree-row session'); row.style.setProperty('--depth', depth); row.draggable = !!p.id; row.dataset.id = p.id || '';
     const open = elem('button', '', 'tree-main'); open.type = 'button'; open.title = `${p.name}${p.host ? ' — ' + p.host : ''}`;
     const info = elem('span', '', 'tree-label'); info.append(elem('span', p.name, 'tree-name'), elem('small', p.type === 'local' ? { powershell: 'PowerShell', cmd: 'Prompt de comando', bash: 'Git Bash', wsl: 'Linux (WSL)', busybox: 'Comandos Unix', msys2: 'Unix com pacman' }[p.shell] : p.type === 'serial' ? `${p.device} · ${p.baudRate}` : p.host ? `${p.username ? p.username + '@' : ''}${p.host}${saved ? ' 🔒' : ''}` : ''));
-    open.append(elem('span', p.remoteApp ? 'APP' : BADGE[p.type] || p.type.toUpperCase(), 'badge badge-' + p.type), info); open.onclick = safe(() => openSession(p));
+    const badge = elem('span', p.remoteApp ? 'APP' : BADGE[p.type] || p.type.toUpperCase(), 'badge badge-' + p.type); paint(badge, p);
+    open.append(badge, info); open.onclick = safe(() => openSession(p));
     row.append(open);
     if (p.id) {
       const more = elem('button', '', 'tree-more'); more.type = 'button'; more.setAttribute('aria-label', `Opções de ${p.name}`); more.append(icon('more')); more.onclick = event => { event.stopPropagation(); const r = more.getBoundingClientRect(); openMenu(r.left, r.bottom + 2, sessionActions(p)); };
@@ -136,6 +166,8 @@ export function setupTree(ctx) {
     // Soltar no espaço vazio tira a sessão da pasta.
     list.ondragover = event => { if (dragging) event.preventDefault(); };
     list.ondrop = event => { event.preventDefault(); moveTo(ROOT); };
+    // Sessão nova ou host alterado: testa logo, sem esperar o próximo ciclo.
+    if (state().config.settings.checkOnline !== false && state().config.profiles.some(p => { const key = target(p); return key && !reach.has(key); })) setTimeout(() => checkOnline(true), 800);
   }
   $('new-folder').onclick = safe(async () => { const name = await promptName('Nova pasta'); if (name) { apply(await call('folder:create', name)); collapsed.delete('@mine'); persist(); render(); } });
   $('sessions-list').oncontextmenu = event => { if (event.target === $('sessions-list')) { event.preventDefault(); openMenu(event.clientX, event.clientY, [{ label: 'Nova sessão…', action: () => sessionForm() }, { label: 'Nova pasta…', action: () => $('new-folder').click() }]); } };
