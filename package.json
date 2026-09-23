@@ -1,6 +1,6 @@
 {
   "name": "stanis-terminal",
-  "version": "1.11.4",
+  "version": "1.11.5",
   "description": "Terminal local para Windows, sem IA, com sessões e ferramentas de infraestrutura.",
   "main": "src/main.cjs",
   "author": "Tiago Torres Stanis",

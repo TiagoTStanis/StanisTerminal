@@ -6,7 +6,7 @@ O projeto se inspira no uso de sessões do MobaXterm e do WindTerm. É um aplica
 
 ## Para usar
 
-Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.11.4-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
+Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.11.5-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
 
 **Evite a versão de arquivo único** (`StanisTerminal-*-win-x64-PORTATIL-LENTO-usar-o-zip.exe`): ela extrai os componentes a cada execução — não só na primeira — e pode levar mais de um minuto toda vez que você abrir. Use-a apenas para testar rapidamente em um computador onde você não vai instalar nada; para uso do dia a dia, use sempre o ZIP extraído. Não precisa instalar Node.js, Python ou Electron em nenhuma das distribuições. Use Windows 10/11 de 64 bits e uma pasta em que você possa salvar arquivos, como Documentos. Consulte os arquivos já publicados em [Releases](https://github.com/TiagoTStanis/StanisTerminal/releases); gerar um pacote local não o publica automaticamente. Para arquivos publicados, confira o SHA-256 e a assinatura GPG do release (veja [como verificar](docs/VERIFICAR-ASSINATURA.md); impressão digital `A345 44C3 43F2 E16B EF64  C7A4 95A1 3721 ED00 B9E6`).
 
@@ -19,7 +19,12 @@ O [manual de uso](docs/LEIA-ME.md) explica backups, X11, atalhos e mensagens com
 
 ## Recursos
 
-**Novo na 1.11.4 — SSH em switches e roteadores antigos:** equipamentos legados que só falam criptografia antiga (`diffie-hellman-group1-sha1`/`group14-sha1`, chaves `ssh-dss`, cifras `aes-cbc`/`3des-cbc`, `hmac-sha1-96`/`hmac-md5`) falhavam com `Handshake failed: no matching key exchange algorithm`. Esses algoritmos agora entram no **fim** da lista de preferência, como no PuTTY: equipamentos modernos continuam negociando os fortes, e os antigos só são usados quando o servidor não oferece nada melhor. Quando isso acontece, o terminal mostra um aviso em amarelo com os algoritmos fracos usados.
+**Novo na 1.11.5 — copiar e colar nos terminais como no Windows Terminal e no PuTTY:** em todos os terminais (PowerShell, cmd, SSH, Telnet, serial…):
+- **Colar:** Ctrl+V, Ctrl+Shift+V, Shift+Insert ou botão direito (sem seleção). Antes, só o Ctrl+Shift+V colava, e o Ctrl+V mandava `^V` para o shell.
+- **Copiar:** Ctrl+C **com texto selecionado** (sem seleção continua sendo o Ctrl+C que interrompe o comando), Ctrl+Shift+C, Ctrl+Insert ou botão direito com seleção.
+- O texto é colado uma única vez. Colagens com várias linhas continuam pedindo confirmação antes.
+
+**Da 1.11.4 — SSH em switches e roteadores antigos:** equipamentos legados que só falam criptografia antiga (`diffie-hellman-group1-sha1`/`group14-sha1`, chaves `ssh-dss`, cifras `aes-cbc`/`3des-cbc`, `hmac-sha1-96`/`hmac-md5`) falhavam com `Handshake failed: no matching key exchange algorithm`. Esses algoritmos agora entram no **fim** da lista de preferência, como no PuTTY: equipamentos modernos continuam negociando os fortes, e os antigos só são usados quando o servidor não oferece nada melhor. Quando isso acontece, o terminal mostra um aviso em amarelo com os algoritmos fracos usados.
 
 **Da 1.11.3 — login SSH em switches:**
 - Muitos switches (Cisco, HP/Aruba, Huawei) só aceitam o login "keyboard-interactive", em que o equipamento pergunta `Password:`. O app abria um segundo diálogo pedindo a senha de novo. Agora responde sozinho com a senha já digitada, como o PuTTY e o MobaXterm fazem. O diálogo só aparece para outras perguntas, como um código de 2 fatores.

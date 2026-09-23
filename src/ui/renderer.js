@@ -159,16 +159,25 @@ async function openSession(profile) {
     terminal.loadAddon(new WebLinksAddon((_, uri) => safe(() => call('links:open', uri))())); extras.attach(item);
     terminal.onData(data => extras.input(item, data));
     terminal.onResize(safe(size => call('terminal:resize', item.id, size.cols, size.rows)));
+    // Copiar/colar como o Windows Terminal e o PuTTY: Ctrl+V, Ctrl+Shift+V e Shift+Insert colam; Ctrl+C com
+    // texto selecionado copia (sem seleção continua sendo o Ctrl+C que interrompe o comando); Ctrl+Shift+C e
+    // Ctrl+Insert copiam. preventDefault evita a colagem nativa do navegador em dobro.
+    const copySelection = () => { const text = terminal.getSelection(); if (!text) return false; safe(() => call('clipboard:write', text))(); terminal.clearSelection(); return true; };
+    const pasteClipboard = () => safe(async () => paste(item, await call('clipboard:read')))();
     terminal.attachCustomKeyEventHandler(event => {
       if (event.type !== 'keydown') return true;
-      if (event.ctrlKey && event.shiftKey && event.code === 'KeyC') { safe(() => call('clipboard:write', terminal.getSelection()))(); return false; }
-      if (event.ctrlKey && event.shiftKey && event.code === 'KeyV') { safe(async () => paste(item, await call('clipboard:read')))(); return false; }
+      const ctrl = event.ctrlKey && !event.altKey && !event.metaKey;
+      if ((ctrl && event.code === 'KeyV') || (event.shiftKey && !event.ctrlKey && !event.altKey && event.code === 'Insert')) { event.preventDefault(); pasteClipboard(); return false; }
+      if (ctrl && event.shiftKey && event.code === 'KeyC') { event.preventDefault(); copySelection(); return false; }
+      if ((ctrl && !event.shiftKey && event.code === 'KeyC' && terminal.hasSelection()) || (ctrl && !event.shiftKey && event.code === 'Insert')) { event.preventDefault(); copySelection(); return false; }
       if (extras.key(item, event)) return false;
       if (event.ctrlKey && event.shiftKey && ['KeyT', 'KeyF', 'KeyW'].includes(event.code)) return false;
       return true;
     });
     // Intercepta colagem nativa para evitar executar várias linhas sem revisão.
     mount.addEventListener('paste', event => { event.preventDefault(); event.stopPropagation(); safe(() => paste(item, event.clipboardData.getData('text/plain')))(); }, true);
+    // Botão direito: com seleção copia, sem seleção cola (como o PuTTY e o Windows Terminal).
+    mount.addEventListener('contextmenu', event => { event.preventDefault(); event.stopPropagation(); if (!copySelection()) pasteClipboard(); }, true);
     await call('terminal:activate', item.id);
   } else {
     item.mount = elem('div', '', 'graphic-mount'); item.pane.append(item.mount);
