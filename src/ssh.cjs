@@ -25,8 +25,16 @@ class SSH {
     }
     let credentials = { password, remember: false };
     const agent = profile.useAgent ? (process.env.SSH_AUTH_SOCK || '\\\\.\\pipe\\openssh-ssh-agent') : undefined;
-    if (!password && !agent) credentials = await this.ask({ title: `Autenticação — ${profile.username}@${profile.host}`, fields: [{ name: 'password', label: profile.keyPath ? 'Frase secreta da chave (vazio se não houver)' : 'Senha SSH', type: 'password' }], remember: true });
-    if (!credentials) throw new Error('Conexão cancelada.');
+    const savedPassword = !!password;
+    // Sem usuário o servidor recusa qualquer login: pede usuário e senha juntos (vale só para esta conexão).
+    const needsUser = !profile.username;
+    if ((!password && !agent) || needsUser) {
+      const fields = [...(needsUser ? [{ name: 'username', label: 'Usuário', required: true }] : []), ...(!password && !agent ? [{ name: 'password', label: profile.keyPath ? 'Frase secreta da chave (vazio se não houver)' : 'Senha SSH', type: 'password' }] : [])];
+      const answer = await this.ask({ title: `Autenticação — ${profile.username || '?'}@${profile.host}`, fields, remember: !password && !agent && !needsUser });
+      if (!answer) throw new Error('Conexão cancelada.');
+      credentials = { ...credentials, ...answer, password: answer.password ?? password };
+    }
+    const username = needsUser ? String(credentials.username || '').trim() : profile.username;
     let parent, sock;
     if (profile.proxyHost) {
       // Proxy SOCKS5 de saída para alcançar o servidor (diferente do túnel/proxy que o app oferece como ferramenta).
@@ -47,13 +55,41 @@ class SSH {
     const address = `${profile.host}:${profile.port}`;
     let ready = false;
     return new Promise((resolve, reject) => {
-      client.on('error', error => { if (!ready) reject(error); });
+      client.on('error', error => {
+        if (ready) return;
+        if (error.level === 'client-authentication') {
+          // Senha salva recusada: esquece para perguntar de novo na próxima vez.
+          if (savedPassword && secrets[profile.id]) { delete secrets[profile.id]; try { writeJSON(this.secretsFile, secrets); } catch { /* opcional */ } }
+          reject(new Error(`Usuário ou senha recusados por ${address} (usuário "${username}").${offered ? ' O servidor aceita: ' + offered.join(', ') + '.' : ''}${savedPassword ? ' A senha salva foi esquecida; a próxima conexão vai pedir de novo.' : ''}`));
+          return;
+        }
+        reject(error);
+      });
       client.on('close', () => { parent?.end(); if (!ready) reject(new Error('Conexão SSH encerrada antes da autenticação.')); });
-      client.on('keyboard-interactive', async (name, instructions, lang, prompts, finish) => {
+      // Ordem dos métodos de login, como o PuTTY/MobaXterm: chave/agente, senha e keyboard-interactive
+      // (muitos switches só aceitam este). Guarda o que o servidor oferece para explicar uma recusa.
+      let offered = null, autoAnswered = false;
+      const methods = [];
+      if (profile.keyPath) methods.push({ type: 'publickey', username, key: fs.readFileSync(profile.keyPath), passphrase: credentials.password || undefined });
+      if (agent) methods.push({ type: 'agent', username, agent });
+      if (!profile.keyPath && !agent) methods.push({ type: 'password', username, password: credentials.password || '' });
+      methods.push({ type: 'keyboard-interactive', username, prompt: async (name, instructions, lang, prompts, finish) => {
+        // Só pede a senha (um prompt oculto "Password:"): responde com a já digitada, uma vez. Outros
+        // prompts (ex.: código de 2 fatores) ou uma segunda rodada vão para o usuário.
+        if (!prompts.length) return finish([]);
+        if (!autoAnswered && credentials.password && prompts.length === 1 && !prompts[0].echo) { autoAnswered = true; return finish([credentials.password]); }
         const answer = await this.ask({ title: name || 'Autenticação SSH', message: instructions, fields: prompts.map((p, i) => ({ name: String(i), label: p.prompt, type: p.echo ? 'text' : 'password' })) });
         if (!answer) { client.end(); return; }
         finish(prompts.map((_, i) => answer[String(i)] || ''));
-      });
+      } });
+      const authHandler = (methodsLeft, partialSuccess, next) => {
+        if (methodsLeft) offered = methodsLeft;
+        while (methods.length) {
+          const method = methods.shift();
+          if (!offered || offered.includes(method.type === 'agent' ? 'publickey' : method.type)) return next(method);
+        }
+        return next(false);
+      };
       client.on('ready', () => {
         try {
           if (credentials.remember && this.safeStorage.isEncryptionAvailable()) {
@@ -64,12 +100,9 @@ class SSH {
         } catch (error) { client.end(); reject(error); }
       });
       try {
-        client.connect({ host: profile.host, port: profile.port, username: profile.username, sock: sock ?? undefined,
-          agent, agentForward: !!(agent && profile.agentForward),
-          password: profile.keyPath || agent ? undefined : credentials.password,
-          privateKey: profile.keyPath ? fs.readFileSync(profile.keyPath) : undefined,
-          passphrase: profile.keyPath ? credentials.password || undefined : undefined,
-          sock, readyTimeout: 30000, keepaliveInterval: 15000, keepaliveCountMax: 3, tryKeyboard: true,
+        client.connect({ host: profile.host, port: profile.port, username, sock: sock ?? undefined,
+          agent, agentForward: !!(agent && profile.agentForward), authHandler,
+          sock, readyTimeout: 30000, keepaliveInterval: 15000, keepaliveCountMax: 3,
           hostVerifier: (key, verify) => {
             (async () => {
               const fingerprint = 'SHA256:' + crypto.createHash('sha256').update(key).digest('base64').replace(/=+$/, '');

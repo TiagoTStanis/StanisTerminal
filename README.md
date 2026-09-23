@@ -6,7 +6,7 @@ O projeto se inspira no uso de sessões do MobaXterm e do WindTerm. É um aplica
 
 ## Para usar
 
-Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.11.2-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
+Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.11.3-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
 
 **Evite a versão de arquivo único** (`StanisTerminal-*-win-x64-PORTATIL-LENTO-usar-o-zip.exe`): ela extrai os componentes a cada execução — não só na primeira — e pode levar mais de um minuto toda vez que você abrir. Use-a apenas para testar rapidamente em um computador onde você não vai instalar nada; para uso do dia a dia, use sempre o ZIP extraído. Não precisa instalar Node.js, Python ou Electron em nenhuma das distribuições. Use Windows 10/11 de 64 bits e uma pasta em que você possa salvar arquivos, como Documentos. Consulte os arquivos já publicados em [Releases](https://github.com/TiagoTStanis/StanisTerminal/releases); gerar um pacote local não o publica automaticamente. Para arquivos publicados, confira o SHA-256 e a assinatura GPG do release (veja [como verificar](docs/VERIFICAR-ASSINATURA.md); impressão digital `A345 44C3 43F2 E16B EF64  C7A4 95A1 3721 ED00 B9E6`).
 
@@ -19,7 +19,12 @@ O [manual de uso](docs/LEIA-ME.md) explica backups, X11, atalhos e mensagens com
 
 ## Recursos
 
-**Novo na 1.11.2 (correção):** um IP com zero à esquerda, como `10.0.0.07` ou `192.168.001.010` (comum em planilhas de rede), falhava com `getaddrinfo ENOTFOUND`. O Node não o reconhecia como IP e tentava resolvê-lo no DNS. Agora cada parte é lida em decimal (`10.0.0.7`), em todas as sessões (SSH, Telnet, RDP, VNC…), inclusive as já salvas e a conexão rápida. Um endereço com alguma parte acima de 255 é recusado com uma mensagem clara.
+**Novo na 1.11.3 — login SSH em switches:**
+- Muitos switches (Cisco, HP/Aruba, Huawei) só aceitam o login "keyboard-interactive", em que o equipamento pergunta `Password:`. O app abria um segundo diálogo pedindo a senha de novo. Agora responde sozinho com a senha já digitada, como o PuTTY e o MobaXterm fazem. O diálogo só aparece para outras perguntas, como um código de 2 fatores.
+- Sessão sem usuário: o app pede usuário e senha juntos (sem usuário, o servidor sempre recusa).
+- No lugar de `All configured authentication methods failed`, a mensagem diz "Usuário ou senha recusados por host:porta (usuário …)" e quais métodos o servidor aceita. Se a senha estava salva e foi recusada, ela é esquecida para a próxima conexão pedir de novo.
+
+**Da 1.11.2 (correção):** um IP com zero à esquerda, como `10.0.0.07` ou `192.168.001.010` (comum em planilhas de rede), falhava com `getaddrinfo ENOTFOUND`. O Node não o reconhecia como IP e tentava resolvê-lo no DNS. Agora cada parte é lida em decimal (`10.0.0.7`), em todas as sessões (SSH, Telnet, RDP, VNC…), inclusive as já salvas e a conexão rápida. Um endereço com alguma parte acima de 255 é recusado com uma mensagem clara.
 
 **Da 1.11.1 (correção do RemoteApp/RDS):** alguns servidores Windows (Connection Broker / RD Session Host) medem a latência (Auto-Detect RTT) logo depois do licenciamento, no mesmo canal dos pedidos de Multitransport. O IronRDP tratava qualquer pacote nesse canal como Multitransport e abortava com `MultitransportRequestPdu ... received 10 bytes, expected 28`. Agora o pedido de Auto-Detect é respondido, como na fase anterior da conexão, e outros pacotes inesperados nesse canal são ignorados em vez de derrubar a conexão.
 
