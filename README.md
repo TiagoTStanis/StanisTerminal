@@ -6,7 +6,7 @@ O projeto se inspira no uso de sessões do MobaXterm e do WindTerm. É um aplica
 
 ## Para usar
 
-Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.10.3-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
+Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.10.4-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
 
 **Evite a versão de arquivo único** (`StanisTerminal-*-win-x64-PORTATIL-LENTO-usar-o-zip.exe`): ela extrai os componentes a cada execução — não só na primeira — e pode levar mais de um minuto toda vez que você abrir. Use-a apenas para testar rapidamente em um computador onde você não vai instalar nada; para uso do dia a dia, use sempre o ZIP extraído. Não precisa instalar Node.js, Python ou Electron em nenhuma das distribuições. Use Windows 10/11 de 64 bits e uma pasta em que você possa salvar arquivos, como Documentos. Consulte os arquivos já publicados em [Releases](https://github.com/TiagoTStanis/StanisTerminal/releases); gerar um pacote local não o publica automaticamente. Para arquivos publicados, confira o SHA-256 e a assinatura GPG do release (veja [como verificar](docs/VERIFICAR-ASSINATURA.md); impressão digital `A345 44C3 43F2 E16B EF64  C7A4 95A1 3721 ED00 B9E6`).
 
@@ -19,7 +19,9 @@ O [manual de uso](docs/LEIA-ME.md) explica backups, X11, atalhos e mensagens com
 
 ## Recursos
 
-**Novo na 1.10.3 — realce de sintaxe para switches e roteadores:** switches quase nunca mandam cor, então nos terminais remotos (SSH, Telnet, serial, Rlogin, Rsh) o app colore na tela, no estilo do MobaXterm:
+**Novo na 1.10.4 (correção do RemoteApp):** o programa do RemoteApp (ex.: `||alias`) agora também vai como "alternate shell" no início da sessão, como o `mstsc` e o FreeRDP fazem. O IronRDP o omitia no modo RemoteApp, e servidores RDS que só permitem programas publicados podiam recusar a abertura.
+
+**Da 1.10.3 — realce de sintaxe para switches e roteadores:** switches quase nunca mandam cor, então nos terminais remotos (SSH, Telnet, serial, Rlogin, Rsh) o app colore na tela, no estilo do MobaXterm:
 - **verde:** `up`, `connected`, `full`, `forwarding`, `established`;
 - **vermelho:** `down`, `notconnect`, `err-disabled`, `blocking`, `failed`, `error`;
 - **amarelo:** `administratively down`, `half`, `warning`;
