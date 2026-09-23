@@ -141,6 +141,11 @@ async function openSession(profile) {
   item.pane = elem('section', '', 'pane'); item.pane.dataset.session = item.id;
   item.pane.addEventListener('mousedown', () => { activeId = item.id; renderTabs(); });
   sessions.set(item.id, item); $('panes').append(item.pane);
+  // Dimensiona o painel ANTES de montar a sessão: o RDP lê item.mount.clientWidth/Height pra decidir
+  // a resolução da tela remota, e sem isso o painel ainda não tinha sido ativado por layout() (podia
+  // estar com 0 ou o tamanho de uma sessão anterior), deixando a imagem remota com proporção errada
+  // pelo resto da sessão — só o CSS escalava, nunca corrigia a resolução pedida ao servidor.
+  activeId = item.id; layout();
   if (!graphical) {
     const mount = elem('div', '', 'terminal-mount'); item.pane.append(mount);
     const terminal = new Terminal({ fontFamily: 'Cascadia Code, Consolas, monospace', fontSize: state.config.settings.fontSize, scrollback: state.config.settings.scrollback, cursorBlink: true, theme: theme(), allowProposedApi: false });
