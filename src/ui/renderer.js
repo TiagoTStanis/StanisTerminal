@@ -7,6 +7,7 @@ import scancode from './rdpkeys.js';
 import { setup } from './extras.js';
 import { setupPackages } from './packages.js';
 import { setupTree } from './tree.js';
+import { highlight } from './highlight.js';
 
 // noVNC intencionalmente não expõe o motivo técnico da falha no evento 'disconnect' (só loga no console).
 // Capturamos aqui para poder mostrar algo além de "Conexão VNC interrompida." quando a negociação falha
@@ -482,13 +483,11 @@ function updateNativeBounds() {
     safe(() => call('graphics:bounds', item.id, { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, visible: !item.pane.hidden && !modal }))();
   }
 }
-const HIGHLIGHT_ERROR = /\b(error|erro|failed|falhou|fatal|exception|panic)\b/gi;
-const HIGHLIGHT_WARNING = /\b(warning|warn|aviso|atenção|deprecated)\b/gi;
-// Destaque em cor (códigos ANSI) só em terminais remotos — SSH, Telnet, serial, Rlogin, Rsh —, onde
-// equipamentos e servidores costumam mandar texto sem cor; os shells locais ficam como o Windows entrega.
+// Realce de sintaxe (códigos ANSI, ver highlight.js) só em terminais remotos — SSH, Telnet, serial, Rlogin,
+// Rsh —, onde switches e roteadores mandam texto sem cor; os shells locais ficam como o Windows entrega.
 function highlightOutput(item, data) {
   if (!state.config.settings.highlightErrors || item.profile?.type === 'local') return data;
-  return data.replace(HIGHLIGHT_ERROR, m => `\x1b[91m${m}\x1b[0m`).replace(HIGHLIGHT_WARNING, m => `\x1b[93m${m}\x1b[0m`);
+  return highlight(data);
 }
 api.on('terminal:data', ({ id, data }) => { const item = sessions.get(id); if (item?.terminal) { item.terminal.write(highlightOutput(item, data)); extras?.output(item, data); } });
 api.on('terminal:exit', ({ id, code }) => { const item = sessions.get(id); if (item) { item.ended = true; item.terminal.writeln(`\r\n\x1b[90m[Sessão encerrada: ${code}]\x1b[0m`); renderTabs(); } });
@@ -612,7 +611,7 @@ $('tools-dialog').addEventListener('close', updateNativeBounds);
 $('settings').onclick = safe(async () => {
   const lock = await call('lock:status');
   const values = await form({ title: 'Preferências', message: 'Dados locais: ' + state.dataPath, fields: [{ name: 'fontSize', label: 'Fonte do terminal', type: 'number', value: state.config.settings.fontSize, min: 10, max: 28 }, { name: 'theme', label: 'Tema', value: state.config.settings.theme, options: [{ value: 'dark', label: 'Escuro' }, { value: 'light', label: 'Claro' }, { value: 'dracula', label: 'Dracula' }, { value: 'nord', label: 'Nord' }, { value: 'solarized', label: 'Solarized escuro' }, { value: 'monokai', label: 'Monokai' }] }, { name: 'scrollback', label: 'Linhas no histórico', type: 'number', value: state.config.settings.scrollback }, { name: 'syncFolder', label: 'Pasta de sincronização (OneDrive, Dropbox, repositório Git…)', value: state.config.settings.syncFolder || '', wide: true }, { name: 'autocomplete', label: 'Sugerir comandos do histórico enquanto digito', type: 'checkbox', value: state.config.settings.autocomplete !== false, wide: true }, { name: 'restoreSessions', label: 'Reabrir as sessões ao iniciar o aplicativo', type: 'checkbox', value: !!state.config.settings.restoreSessions, wide: true },
-    { name: 'highlightErrors', label: 'Destacar "error"/"erro", "failed"/"falhou" e "warning"/"aviso" em cor nos terminais remotos (SSH, Telnet, serial)', type: 'checkbox', value: state.config.settings.highlightErrors !== false, wide: true },
+    { name: 'highlightErrors', label: 'Realce de sintaxe nos terminais remotos (SSH, Telnet, serial): up/down, erros e avisos, IPs, MACs, interfaces e o prompt do equipamento', type: 'checkbox', value: state.config.settings.highlightErrors !== false, wide: true },
     { name: 'lockPassword', label: lock.enabled ? 'Trocar a senha mestra (deixe vazio para manter; “remover” abaixo tira a proteção)' : 'Definir senha mestra (bloqueia a lista de sessões ao abrir o app)', type: 'password', wide: true },
     { name: 'autoLockMinutes', label: 'Bloquear automaticamente após (minutos, 0 = nunca)', type: 'number', value: lock.autoLockMinutes || 15, min: 0, max: 180 },
     ...(lock.enabled ? [{ name: 'removeLock', label: 'Remover a senha mestra (pede a senha atual)', type: 'checkbox', wide: true }] : []),

@@ -6,7 +6,7 @@ O projeto se inspira no uso de sessões do MobaXterm e do WindTerm. É um aplica
 
 ## Para usar
 
-Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.10.2-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
+Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.10.3-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
 
 **Evite a versão de arquivo único** (`StanisTerminal-*-win-x64-PORTATIL-LENTO-usar-o-zip.exe`): ela extrai os componentes a cada execução — não só na primeira — e pode levar mais de um minuto toda vez que você abrir. Use-a apenas para testar rapidamente em um computador onde você não vai instalar nada; para uso do dia a dia, use sempre o ZIP extraído. Não precisa instalar Node.js, Python ou Electron em nenhuma das distribuições. Use Windows 10/11 de 64 bits e uma pasta em que você possa salvar arquivos, como Documentos. Consulte os arquivos já publicados em [Releases](https://github.com/TiagoTStanis/StanisTerminal/releases); gerar um pacote local não o publica automaticamente. Para arquivos publicados, confira o SHA-256 e a assinatura GPG do release (veja [como verificar](docs/VERIFICAR-ASSINATURA.md); impressão digital `A345 44C3 43F2 E16B EF64  C7A4 95A1 3721 ED00 B9E6`).
 
@@ -19,7 +19,17 @@ O [manual de uso](docs/LEIA-ME.md) explica backups, X11, atalhos e mensagens com
 
 ## Recursos
 
-**Novo na 1.10.2 — RemoteApp com Connection Broker:**
+**Novo na 1.10.3 — realce de sintaxe para switches e roteadores:** switches quase nunca mandam cor, então nos terminais remotos (SSH, Telnet, serial, Rlogin, Rsh) o app colore na tela, no estilo do MobaXterm:
+- **verde:** `up`, `connected`, `full`, `forwarding`, `established`;
+- **vermelho:** `down`, `notconnect`, `err-disabled`, `blocking`, `failed`, `error`;
+- **amarelo:** `administratively down`, `half`, `warning`;
+- **ciano:** IPs (v4 e v6) e MACs (Cisco, HP/Huawei e com dois-pontos);
+- **azul:** interfaces (`GigabitEthernet1/0/1`, `Gi1/0/1`, `Te1/1/1`, `Port-channel1`, `Vlan10`, `ge-0/0/0`…);
+- **magenta:** o prompt do equipamento (`SW-CORE#`, `R1(config-if)#`, `<HUAWEI>`).
+
+O realce só colore o que aparece na tela. Nada muda no que o equipamento recebe, e as cores que o próprio servidor manda continuam intactas. Os terminais locais (PowerShell, cmd) ficam sem realce. Liga e desliga em Preferências.
+
+**Da 1.10.2 — RemoteApp com Connection Broker:**
 - O `loadbalanceinfo` do `.rdp` (ex.: `tsv://MS Terminal Services Plugin.1.<Coleção>`) agora é lido na importação e enviado na conexão, como faz o `mstsc`. Ele diz ao Connection Broker em qual coleção abrir o programa. Sem ele, o servidor recusava o RemoteApp por o programa não estar publicado naquela coleção. Nas sessões criadas à mão, o campo fica em Avançados ("Load balance info").
 - A mensagem de recusa mostra o motivo real do servidor, mesmo quando o nome do programa tem parênteses, como `||Programa (1)`.
 
