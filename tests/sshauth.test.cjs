@@ -72,3 +72,27 @@ test('sessão sem usuário: pede usuário e senha juntos', async () => {
     assert.ok(seen.includes('password:operador'));
   } finally { server.close(); cleanup(); }
 });
+
+test('switch legado (só diffie-hellman-group1-sha1 + aes128-cbc + hmac-sha1) conecta e avisa; servidor moderno não', async () => {
+  const hostKey = utils.generateKeyPairSync('rsa', { bits: 2048 }).private;
+  const start = algorithms => new Promise(resolve => {
+    const server = new Server({ hostKeys: [hostKey], algorithms }, client => {
+      client.on('authentication', ctx => ctx.method === 'password' && ctx.password === 'segredo' ? ctx.accept() : ctx.reject(['password']));
+      client.on('ready', () => client.end()); client.on('error', () => {});
+    });
+    server.listen(0, '127.0.0.1', () => resolve(server));
+  });
+  const legacy = await start({ kex: ['diffie-hellman-group1-sha1'], cipher: ['aes128-cbc'], hmac: ['hmac-sha1'], serverHostKey: ['ssh-rsa'] });
+  const modern = await start(undefined);
+  try {
+    for (const [server, expectWeak] of [[legacy, true], [modern, false]]) {
+      const { ssh, cleanup } = sshWith([{ password: 'segredo' }]);
+      try {
+        const client = await ssh.connect({ id: 'sw', type: 'ssh', host: '127.0.0.1', port: server.address().port, username: 'admin' });
+        client.end();
+        if (expectWeak) assert.ok(client.legacyAlgorithms.includes('diffie-hellman-group1-sha1') && client.legacyAlgorithms.includes('aes128-cbc'), JSON.stringify(client.legacyAlgorithms));
+        else assert.deepEqual(client.legacyAlgorithms, []);
+      } finally { cleanup(); }
+    }
+  } finally { legacy.close(); modern.close(); }
+});

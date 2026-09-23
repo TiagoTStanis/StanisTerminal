@@ -45,6 +45,7 @@ class Sessions {
         processPty.onData(data); processPty.onExit(event => end(event.exitCode));
       } else if (profile.type === 'ssh' || profile.type === 'ssh-x11') {
         const client = await this.ssh.connect(profile); item.client = client; item.kill = () => client.end();
+        if (client.legacyAlgorithms?.length) data(`\x1b[93mAviso: este equipamento só aceita criptografia antiga (${client.legacyAlgorithms.join(', ')}). A conexão funciona, mas é mais fraca; se possível, atualize o firmware ou habilite algoritmos modernos no equipamento.\x1b[0m\r\n`);
         const x11 = profile.type === 'ssh-x11' ? this.getX11() : null;
         if (x11) client.on('x11', (info, accept) => { const channel = accept(); const socket = net.createConnection({ host: '127.0.0.1', port: 6000 + x11.display }); socket.on('error', () => channel.destroy()); channel.on('error', () => socket.destroy()); socket.pipe(channel).pipe(socket); channel.on('close', () => socket.destroy()); client.once('close', () => socket.destroy()); });
         const window = { term: 'xterm-256color', cols, rows };

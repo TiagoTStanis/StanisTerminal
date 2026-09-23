@@ -5,6 +5,18 @@ const { Client } = require('ssh2');
 const { SocksClient } = require('socks');
 const { readJSON, writeJSON } = require('./config.cjs');
 
+// Algoritmos antigos que switches e roteadores legados ainda exigem (a biblioteca os desliga por padrão).
+// Entram no FIM da lista de preferência: equipamentos modernos continuam negociando os fortes, e estes só
+// são usados quando o servidor não oferece nada melhor — como faz o PuTTY. Quando usados, o terminal avisa.
+const LEGACY = {
+  kex: ['diffie-hellman-group14-sha1', 'diffie-hellman-group-exchange-sha1', 'diffie-hellman-group1-sha1'],
+  serverHostKey: ['ssh-dss'],
+  cipher: ['aes128-cbc', 'aes192-cbc', 'aes256-cbc', '3des-cbc'],
+  hmac: ['hmac-sha1-96', 'hmac-md5'],
+};
+const ALGORITHMS = Object.fromEntries(Object.entries(LEGACY).map(([kind, names]) => [kind, { append: names }]));
+const WEAK = new Set(Object.values(LEGACY).flat().concat(['ssh-rsa', 'hmac-sha1']));
+
 // A mesma conexão atende ao terminal e ao SFTP. Nenhuma senha entra em config.json.
 class SSH {
   constructor(config, ask, safeStorage) {
@@ -90,6 +102,10 @@ class SSH {
         }
         return next(false);
       };
+      // Guarda os algoritmos fracos que acabaram negociados, para o terminal avisar.
+      client.on('handshake', negotiated => {
+        client.legacyAlgorithms = [negotiated.kex, negotiated.serverHostKey, negotiated.cs?.cipher, negotiated.cs?.mac].filter(name => name && WEAK.has(name));
+      });
       client.on('ready', () => {
         try {
           if (credentials.remember && this.safeStorage.isEncryptionAvailable()) {
@@ -101,7 +117,7 @@ class SSH {
       });
       try {
         client.connect({ host: profile.host, port: profile.port, username, sock: sock ?? undefined,
-          agent, agentForward: !!(agent && profile.agentForward), authHandler,
+          agent, agentForward: !!(agent && profile.agentForward), authHandler, algorithms: ALGORITHMS,
           sock, readyTimeout: 30000, keepaliveInterval: 15000, keepaliveCountMax: 3,
           hostVerifier: (key, verify) => {
             (async () => {
@@ -122,4 +138,4 @@ class SSH {
 function sftpCall(sftp, method, ...args) {
   return new Promise((resolve, reject) => sftp[method](...args, (error, value) => error ? reject(error) : resolve(value)));
 }
-module.exports = { SSH, sftpCall };
+module.exports = { SSH, sftpCall, LEGACY };
