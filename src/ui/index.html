@@ -13,12 +13,13 @@
 </head>
 <body>
   <header class="topbar">
+    <button id="toggle-sidebar" title="Recolher/expandir lateral (Ctrl+Shift+B)" aria-label="Recolher/expandir lateral" aria-expanded="true" aria-controls="session-sidebar">&#9776;</button>
     <div class="brand"><span class="logo">&gt;_</span><strong>Stanis Terminal</strong></div>
     <nav><button id="new-session" class="primary">＋ Nova sessão</button><div class="quick"><select id="quick-type" aria-label="Protocolo"><option value="rdp">RDP</option><option value="ssh">SSH</option><option value="vnc">VNC</option><option value="telnet">Telnet</option></select><input id="quick-input" placeholder="usuario@servidor" aria-label="Conexão rápida" spellcheck="false"><button id="quick-go" title="Conectar">→</button></div><button id="local-shell">Terminal local</button><button id="toggle-files">Arquivos</button><button id="open-packages">Pacotes</button><button id="open-tools">Ferramentas</button></nav>
     <div class="local-badge" title="Sem telemetria, sem conta e sem nuvem"><span></span> Somente local</div><button id="lock-now" class="icon" title="Bloquear" hidden>🔒</button><button id="settings" class="icon" title="Preferências">⚙</button>
   </header>
   <div class="app-layout">
-    <aside class="sidebar">
+    <aside class="sidebar" id="session-sidebar">
       <div class="section-title">Sessões <button id="new-folder" title="Nova pasta">＋ Pasta</button></div>
       <div class="import-actions"><button id="import-sessions" title="Importar XML do mRemoteNG, SSH config ou JSON">Importar arquivo</button><button id="import-system" title="Importar do PuTTY, SSH config ou mRemoteNG">De outro app</button></div>
       <input id="filter-sessions" class="search" placeholder="Filtrar sessões…" aria-label="Filtrar sessões">
@@ -29,8 +30,8 @@
     </aside>
     <main>
       <div class="tabbar"><div id="tabs" role="tablist"></div><button id="add-tab" title="Novo terminal">＋</button></div>
-      <div class="workspace-toolbar"><div id="session-label">Pronto para conectar</div><div class="toolbar-actions"><button id="reconnect" title="Reconectar sessão">↻</button><button id="split" title="Alternar divisão de painéis">◫ Dividir</button><button id="find">Buscar</button><button id="log">Gravar saída</button><button id="broadcast">Multiexecução</button></div></div>
-      <div id="findbar" hidden><input id="find-input" placeholder="Pesquisar no terminal ativo"><button id="find-prev">↑</button><button id="find-next">↓</button><button id="find-close">✕</button></div>
+      <div class="workspace-toolbar"><div id="session-label" title="Pronto para conectar">Pronto para conectar</div><div class="toolbar-actions"><button id="focus-mode" title="Modo foco (F11)" aria-pressed="false">Modo foco</button><button id="reconnect" title="Reconectar sessão">↻</button><button id="split" title="Alternar divisão de painéis">◫ Dividir</button><span class="toolbar-sep"></span><button id="find" class="term-only">Buscar</button><button id="log" class="term-only">Gravar saída</button><button id="broadcast" class="term-only">Multiexecução</button></div></div>
+      <div id="findbar" class="term-only" hidden><input id="find-input" placeholder="Pesquisar no terminal ativo"><button id="find-prev">↑</button><button id="find-next">↓</button><button id="find-close">✕</button></div>
       <div id="workspace">
         <section id="welcome"><div class="welcome-mark">&gt;_</div><span class="eyebrow">Conexões sob seu controle</span><h1>Todas as suas sessões<br>em um só lugar</h1><p>Terminais, arquivos e acesso remoto na mesma janela.<br>Dados salvos no seu computador, sem serviços de IA.</p><div class="welcome-actions"><button class="primary" id="welcome-local">Abrir PowerShell <span>↗</span></button><button id="welcome-ssh">Conectar por SSH</button></div><div class="feature-row"><div><b>Organize</b><strong>Pastas e subpastas</strong><span>Arraste sessões entre pastas</span></div><div><b>Conecte</b><strong>RDP com um clique</strong><span>Senha guardada com segurança</span></div><div><b>Instale</b><strong>Pacotes e listas</strong><span>Tudo pelo winget, sem nuvem</span></div></div></section>
         <div id="panes"></div>
@@ -44,6 +45,7 @@
       <div id="file-list"></div><div id="file-status">Selecione uma pasta.</div>
     </aside>
   </div>
+  <button id="exit-focus" title="Sair do foco (F11)">Sair do foco</button>
   <footer><span class="status-dot"></span><span id="status">Pronto</span><span id="session-count">0 sessões</span><span class="footer-right">UTF-8 <span>│</span> WINDOWS <span>│</span> <span id="version">0.1.0</span></span></footer>
   <dialog id="import-dialog" aria-labelledby="import-title"><div class="dialog-heading"><h2 id="import-title">Trazer conexões de outro app</h2><button id="import-close" aria-label="Fechar importação">✕</button></div><div class="import-choices"><button id="import-file"><strong>Escolher arquivo</strong><small>XML exportado do mRemoteNG, arquivo config do OpenSSH ou JSON do Stanis Terminal.</small></button><button id="import-scan"><strong>Procurar neste computador</strong><small>PuTTY, ~/.ssh/config e mRemoteNG nos locais padrão. Para versões portáteis, escolha o arquivo.</small></button></div><p id="import-status" role="status">Você poderá revisar as conexões antes de importar. Senhas não são importadas.</p></dialog>
   <dialog id="form-dialog"><form id="dialog-form"><div class="dialog-heading"><h2 id="dialog-title"></h2><button type="button" id="dialog-x">✕</button></div><p id="dialog-message"></p><div id="dialog-fields"></div><div class="dialog-actions"><button type="button" id="dialog-cancel">Cancelar</button><button type="submit" class="primary" id="dialog-ok">Salvar</button></div></form></dialog>

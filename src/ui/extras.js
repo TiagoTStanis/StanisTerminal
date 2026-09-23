@@ -84,7 +84,7 @@ export function setup(ctx) {
     liveButton.textContent = live.broadcast ? '● Digitando em todos' : 'Digitar em todos';
     toast(live.broadcast ? 'Tudo o que você digitar vai para os painéis visíveis. Use Dividir para escolher quais.' : 'Digitação simultânea desligada.');
   });
-  liveButton.id = 'broadcast-live'; $('broadcast').after(liveButton);
+  liveButton.id = 'broadcast-live'; liveButton.classList.add('term-only'); $('broadcast').after(liveButton);
 
   // ---------- Macros ----------
   const macros = () => state().config.macros || (state().config.macros = []);
@@ -111,7 +111,7 @@ export function setup(ctx) {
     if (op === 'play') await playMacro(macro, current());
     if (op === 'delete') state().config.macros = await call('macros:save', list.filter((_, i) => i !== Number(index)));
   });
-  macroButton.id = 'macros'; liveButton.after(macroButton);
+  macroButton.id = 'macros'; macroButton.classList.add('term-only'); liveButton.after(macroButton);
 
   // ---------- Scripts Lua (locais, em sandbox) ----------
   const scripts = () => state().config.scripts || (state().config.scripts = []);
@@ -147,7 +147,7 @@ export function setup(ctx) {
     if (op === 'edit') { const v = await form({ title: 'Editar script', fields: [{ name: 'name', label: 'Nome', value: script.name, required: true, wide: true }, { name: 'code', label: 'Código', type: 'textarea', value: script.code, wide: true }], accept: 'Salvar' }); if (v) await save(Number(index), v); }
     if (op === 'delete') state().config.scripts = await call('scripts:save', list.filter((_, i) => i !== Number(index)));
   });
-  scriptButton.id = 'scripts'; macroButton.after(scriptButton);
+  scriptButton.id = 'scripts'; scriptButton.classList.add('term-only'); macroButton.after(scriptButton);
 
   // ---------- Painel de arquivos que acompanha o terminal (OSC 7) ----------
   let follow = false;

@@ -1,13 +1,14 @@
 /* Stanis Terminal — visual claro e enxuto. Tokens em :root; os temas só trocam as variáveis. */
 :root {
   color-scheme: light;
-  --bg: #f3f4f6; --panel: #ffffff; --raised: #f0f2f5; --hover: #eceff3; --line: #e2e5ea; --line-strong: #cfd4db;
-  --text: #1f2933; --muted: #6b7785; --accent: #2563eb; --accent-hover: #1d4fd0; --accent-bg: #e8f0fe; --accent-fg: #ffffff;
-  --danger: #c62828; --danger-bg: #fdecea; --ok: #1b7f4b; --warn: #b26a00; --terminal: #ffffff;
-  --shadow: 0 8px 30px rgba(15, 23, 42, .14); --radius: 8px;
-  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; font-size: 13px;
+  --bg: #f2f2f7; --panel: #ffffff; --raised: #f5f5f5; --hover: rgba(0,0,0,.06); --line: #e0e0e0; --line-strong: #c4c4c4;
+  --text: #1c1b1f; --muted: #6c6c80; --accent: #005ac1; --accent-hover: #004494; --accent-bg: #d6e3ff; --accent-fg: #ffffff;
+  --danger: #ba1a1a; --danger-bg: #ffdad6; --ok: #006d40; --warn: #7d5800; --terminal: #ffffff;
+  --shadow: 0 1px 3px rgba(0,0,0,.12), 0 1px 2px rgba(0,0,0,.08); --radius: 12px;
+  --shadow-2: 0 2px 6px rgba(0,0,0,.15), 0 1px 2px rgba(0,0,0,.1);
+  font-family: "Segoe UI Variable Display", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; font-size: 13px; line-height: 1.4;
 }
-.t-dark { color-scheme: dark; --bg: #14161a; --panel: #1b1e23; --raised: #23272e; --hover: #2a2f37; --line: #2c313a; --line-strong: #3b424d; --text: #e6e9ee; --muted: #98a2b0; --accent: #6ea8fe; --accent-hover: #8dbaff; --accent-bg: #22334d; --accent-fg: #0b1a30; --danger: #ff8a80; --danger-bg: #3a2222; --ok: #6fd39b; --warn: #f0b45a; --terminal: #15181c; --shadow: 0 10px 34px rgba(0, 0, 0, .5); }
+.t-dark { color-scheme: dark; --bg: #131316; --panel: #1d1d22; --raised: #28282d; --hover: rgba(255,255,255,.08); --line: #33333a; --line-strong: #48484f; --text: #e4e1e9; --muted: #908d96; --accent: #adc6ff; --accent-hover: #d6e3ff; --accent-bg: #00315e; --accent-fg: #00174b; --danger: #ff8a80; --danger-bg: #3a2222; --ok: #6fd39b; --warn: #f0b45a; --terminal: #15181c; --shadow: 0 10px 34px rgba(0, 0, 0, .5); }
 .t-dracula { color-scheme: dark; --bg: #1e1f29; --panel: #282a36; --raised: #313445; --hover: #3a3d50; --line: #3f4256; --line-strong: #565a75; --text: #f8f8f2; --muted: #a0a5c4; --accent: #bd93f9; --accent-hover: #cfb0ff; --accent-bg: #3d3560; --accent-fg: #1d1533; --danger: #ff7b7b; --danger-bg: #3d2530; --terminal: #282a36; --shadow: 0 10px 34px rgba(0, 0, 0, .5); }
 .t-nord { color-scheme: dark; --bg: #272c36; --panel: #2e3440; --raised: #3b4252; --hover: #434c5e; --line: #434c5e; --line-strong: #59647a; --text: #e5e9f0; --muted: #a3adbf; --accent: #88c0d0; --accent-hover: #a3d1de; --accent-bg: #3a4f58; --accent-fg: #14262c; --danger: #e58a92; --danger-bg: #3f2f35; --terminal: #2e3440; --shadow: 0 10px 34px rgba(0, 0, 0, .5); }
 .t-solarized { color-scheme: dark; --bg: #00212b; --panel: #002b36; --raised: #073642; --hover: #0d4553; --line: #0d4553; --line-strong: #1c5b6b; --text: #a6b3b3; --muted: #71878b; --accent: #2aa198; --accent-hover: #3cc0b5; --accent-bg: #0a4a4e; --accent-fg: #00211f; --danger: #ef6a67; --danger-bg: #3a2a2a; --terminal: #002b36; --shadow: 0 10px 34px rgba(0, 0, 0, .5); }
@@ -82,10 +83,10 @@ nav { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
 .ic-chevron.open { transform: rotate(90deg); }
 .ic-folder { color: #d6a33a; }
 .badge { flex-shrink: 0; min-width: 32px; padding: 2px 5px; border-radius: 5px; font: 700 9.5px/1.4 "Segoe UI", sans-serif; text-align: center; letter-spacing: .03em; background: var(--raised); color: var(--muted); border: 1px solid var(--line); }
-.badge-ssh, .badge-ssh-x11 { background: #e7f0ff; color: #1d4fd0; border-color: #cfe0ff; }
+.badge-ssh, .badge-ssh-x11 { background: #e7f0ff; color: #004494; border-color: #cfe0ff; }
 .badge-rdp { background: #efe9ff; color: #5b33c4; border-color: #ddd1ff; }
 .badge-vnc { background: #e3f6f3; color: #0c7a6b; border-color: #c4ebe5; }
-.badge-local { background: #eceff3; color: #3d4652; }
+.badge-local { background: rgba(0,0,0,.06); color: #3d4652; }
 .badge-telnet, .badge-rlogin, .badge-rsh { background: #fff1e0; color: #a35a00; border-color: #ffdcb0; }
 .badge-serial { background: #e9f7e8; color: #2b7a2b; border-color: #cdebca; }
 .t-dark .badge, .t-dracula .badge, .t-nord .badge, .t-solarized .badge, .t-monokai .badge { background: var(--raised); color: var(--accent); border-color: var(--line-strong); }
@@ -275,3 +276,76 @@ h2 { font-size: 16px; font-weight: 600; margin: 0; }
 .seg-btn { height: 28px; font-size: 12.5px; color: var(--muted); }
 .seg-btn.active { background: var(--panel); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, .14); }
 .pk-install-unix { margin: 0 auto; display: block; }
+
+/* M3: faixas compactas e controles preservados em janelas estreitas. */
+* { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+button { border: none; border-radius: 8px; }
+button:active { transform: scale(.97); transition: transform .08s; }
+button:focus-visible { outline-offset: 2px; }
+input:focus-visible, select:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+button.primary { height: 32px; box-shadow: 0 1px 2px rgba(0,0,0,.15); }
+button.primary:hover { filter: brightness(1.08); }
+button.small { background: var(--accent-bg); color: var(--accent); height: 28px; }
+button.small.primary { background: var(--accent); color: var(--accent-fg); }
+button.small.danger { background: var(--danger-bg); color: var(--danger); }
+.topbar { height: 40px; padding: 0 12px; gap: 8px; overflow-x: auto; }
+.topbar > *, .topbar nav > * { flex-shrink: 0; }
+.topbar nav { min-width: max-content; }
+#toggle-sidebar { width: 28px; padding: 0; }
+.sidebar { padding: 8px; transition: width .15s ease, padding .15s ease; overflow: hidden; }
+.sidebar.collapsed { width: 0; padding: 0; border: 0; }
+.sidebar.collapsed > * { visibility: hidden; }
+.section-title { margin: 0 4px 8px; }
+.import-actions { gap: 8px; margin-bottom: 8px; }
+.tabbar { height: 32px; min-height: 32px; padding-left: 4px; align-items: center; gap: 4px; overflow-x: auto; }
+#tabs { flex: 1 0 100px; min-width: 100px; padding-top: 3px; }
+#tabs .tab { height: 28px; min-width: 100px; padding: 0 4px 0 10px; color: var(--muted); border-bottom: 2px solid transparent; border-radius: 0; background: none; box-shadow: none; transition: color .12s, border-color .12s; }
+#tabs .tab:hover { color: var(--text); background: var(--hover); border-radius: 8px 8px 0 0; }
+#tabs .tab.active { color: var(--accent); border-bottom-color: var(--accent); background: none; box-shadow: none; font-weight: 600; }
+#add-tab { width: 24px; height: 24px; flex-shrink: 0; }
+.workspace-toolbar { height: 28px; min-height: 28px; padding: 0 8px 0 12px; }
+.tabbar > .workspace-toolbar { flex: 0 0 auto; border: 0; gap: 8px; padding: 0 4px; }
+.tabbar #session-label { max-width: 120px; font-size: 11px; }
+.toolbar-actions { gap: 4px; flex-shrink: 0; }
+.toolbar-actions button { padding: 0 6px; }
+footer { height: 22px; padding: 0 12px; }
+h1 { font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif; font-weight: 700; }
+h2 { letter-spacing: 0; }
+dialog { border-radius: 16px; padding: 24px; box-shadow: var(--shadow-2); }
+.ctx-menu { border-radius: 12px; box-shadow: var(--shadow-2); }
+.tree-row { border-radius: 8px; min-height: 36px; padding: 4px 8px 4px calc(8px + var(--depth) * 14px); transition: background .1s; }
+.tree-row:has(.tree-main:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tree-main { height: 36px; }
+.tree-row.session .tree-main { height: 40px; }
+.badge { border-radius: 8px; font-size: 10px; padding: 2px 6px; font-weight: 600; }
+.t-dracula, .t-nord, .t-solarized, .t-monokai { --ok: #6fd39b; --warn: #f0b45a; }
+.t-solarized { --muted: #96aaae; }
+/* Barra da sessão gráfica no topo central (como a barra de conexão do RDP do Windows): não cobre o botão de fechar das janelas remotas. */
+.graphic-toolbar { top: 6px; right: auto; left: 50%; transform: translateX(-50%); max-width: calc(100% - 24px); box-shadow: var(--shadow-2, var(--shadow)); overflow-x: auto; opacity: 0; pointer-events: none; transition: opacity .2s; backdrop-filter: blur(8px); background: color-mix(in srgb, var(--panel) 82%, transparent); border: 1px solid var(--line); border-radius: 8px; padding: 4px; gap: 4px; }
+.pane.show-bar > .graphic-toolbar, .graphic-toolbar:hover, .graphic-toolbar:focus-within { opacity: 1; pointer-events: auto; }
+.graphic-toolbar button { height: 28px; min-width: 28px; padding: 0 8px; border-radius: 6px; color: var(--text); background: var(--panel); flex-shrink: 0; }
+.graphic-toolbar button:hover { background: var(--hover); }
+body.focus-mode .topbar, body.focus-mode .sidebar, body.focus-mode .tabbar, body.focus-mode .workspace-toolbar, body.focus-mode footer, body.focus-mode #file-panel, body.focus-mode #findbar { display: none; }
+body.focus-mode .app-layout { height: 100vh; }
+
+/* #exit-focus fica oculto no modo foco e aparece com o mouse no topo da janela (detectado em JS, sem bloquear cliques na sessão). */
+#exit-focus { position: fixed; top: 6px; left: 12px; z-index: 20; height: 28px; background: var(--panel); color: var(--text); box-shadow: var(--shadow-2); display: none; opacity: 0; pointer-events: none; transition: opacity .15s; }
+body.focus-mode #exit-focus { display: block; }
+body.focus-mode #exit-focus:focus-visible { opacity: 1; pointer-events: auto; }
+body.focus-mode.reveal-exit #exit-focus, #exit-focus:hover { opacity: 1; pointer-events: auto; }
+
+
+/* --- Tarefa 1: ocultar botões term-only quando a sessão ativa é gráfica --- */
+body.graphical-active .term-only { display: none !important; }
+
+/* --- Tarefa 3: ocultar toolbar quando não há sessões abertas --- */
+body.no-sessions .workspace-toolbar { display: none !important; }
+
+/* --- Tarefa 2: barra de ações compacta e legível --- */
+.toolbar-actions button { height: 28px; padding: 0 10px; border-radius: 8px; font-size: 12px; }
+.toolbar-actions button:hover { background: var(--hover); }
+#session-label { min-width: 140px; max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Separador vertical sutil entre grupos de botões */
+.toolbar-sep { width: 1px; height: 16px; background: var(--line-strong); margin: 0 4px; flex-shrink: 0; }
+
+@media (prefers-reduced-motion: reduce) { .sidebar, .graphic-toolbar, #tabs .tab, #exit-focus { transition: none; } }

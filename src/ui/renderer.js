@@ -376,19 +376,35 @@ async function closeSession(id, force = false) {
   layout(); scheduleSaveOpen();
 }
 function renderTabs() {
-  $('tabs').replaceChildren();
+  const signature = JSON.stringify([...sessions.values()].map(item => [item.id, item.name, item.ended]));
+  const rebuild = $('tabs').dataset.signature !== signature;
+  if (rebuild) { $('tabs').replaceChildren(); $('tabs').dataset.signature = signature; }
   for (const item of sessions.values()) {
+    if (!rebuild) { const tab = [...$('tabs').children].find(tab => tab.dataset.id === String(item.id)); tab.classList.toggle('active', item.id === activeId); tab.setAttribute('aria-selected', String(item.id === activeId)); item.pane.classList.toggle('selected', item.id === activeId); continue; }
     const tab = elem('div', '', 'tab' + (item.id === activeId ? ' active' : '')); tab.setAttribute('role', 'tab'); tab.setAttribute('aria-selected', String(item.id === activeId));
+    tab.dataset.id = String(item.id);
+    tab.ondblclick = event => { if (event.target.closest('button')) return; activeId = item.id; setFocusMode(!document.body.classList.contains('focus-mode')); };
     tab.append(elem('span', (item.ended ? '○ ' : '● ') + item.name));
     const close = button('✕', event => { event.stopPropagation(); return closeSession(item.id); }); close.title = 'Fechar sessão'; tab.append(close);
-    tab.onclick = () => { activeId = item.id; layout(); item.terminal?.focus(); }; $('tabs').append(tab);
+    tab.onclick = event => { if (event.target.closest('button')) return; activeId = item.id; layout(); item.terminal?.focus(); }; $('tabs').append(tab);
     item.pane.classList.toggle('selected', item.id === activeId);
   }
-  const item = current(); $('session-label').textContent = item ? `${item.profile.type.toUpperCase()}  /  ${item.profile.host || item.profile.shell || item.profile.device || 'Local'}  /  ${item.name}` : 'Pronto para conectar';
+  const item = current(); const labelText = item ? `${item.profile.type.toUpperCase()}  /  ${item.profile.host || item.profile.shell || item.profile.device || 'Local'}  /  ${item.name}` : 'Pronto para conectar'; $('session-label').textContent = labelText; $('session-label').title = labelText;
   $('session-count').textContent = `${sessions.size} sessões`; $('log').textContent = item?.logging ? '● Parar gravação' : 'Gravar saída';
 }
 function layout() {
   renderTabs(); $('welcome').hidden = sessions.size > 0;
+  const toolbar = document.querySelector('.workspace-toolbar'), tabbar = document.querySelector('.tabbar');
+  if (sessions.size && toolbar.parentElement !== tabbar) tabbar.append(toolbar);
+  if (!sessions.size && toolbar.parentElement === tabbar) tabbar.after(toolbar);
+  if (!sessions.size) { document.body.classList.remove('focus-mode'); $('focus-mode').setAttribute('aria-pressed', 'false'); }
+
+  // Tarefa 1: classe body.graphical-active quando a sessão ativa é gráfica
+  const activeItem = current();
+  document.body.classList.toggle('graphical-active', !!activeItem?.graphical && !activeItem.ended);
+  // Tarefa 3: classe body.no-sessions quando não há sessões abertas
+  document.body.classList.toggle('no-sessions', sessions.size === 0);
+
   const ids = [...sessions.keys()]; const selected = split ? [activeId, ...ids.filter(id => id !== activeId)].slice(0, 4) : [activeId];
   $('panes').classList.toggle('split', split && sessions.size > 1); $('panes').classList.toggle('many', split && selected.length > 2);
   for (const item of sessions.values()) item.pane.hidden = !selected.includes(item.id);
@@ -610,6 +626,39 @@ async function importConnections(channel) {
 }
 $('import-scan').onclick = () => importConnections('import:scan');
 $('import-file').onclick = $('import-sessions').onclick = () => importConnections('import:file');
+// Armazenamento opcional: lateral expandida quando não há preferência válida.
+const sidebar = document.querySelector('.sidebar');
+try { const collapsed = localStorage.getItem('sidebar-collapsed') === '1'; sidebar.classList.toggle('collapsed', collapsed); sidebar.inert = collapsed; $('toggle-sidebar').setAttribute('aria-expanded', String(!collapsed)); } catch { /* armazenamento indisponível */ }
+$('toggle-sidebar').onclick = () => {
+  const collapsed = sidebar.classList.toggle('collapsed'); sidebar.inert = collapsed;
+  $('toggle-sidebar').setAttribute('aria-expanded', String(!collapsed));
+  try { localStorage.setItem('sidebar-collapsed', collapsed ? '1' : '0'); } catch { /* preferência opcional */ }
+  layout(); setTimeout(layout, 180);
+};
+sidebar.addEventListener('transitionend', event => { if (event.propertyName === 'width') layout(); });
+function setFocusMode(enabled) {
+  enabled = enabled && sessions.size > 0;
+  document.body.classList.toggle('focus-mode', enabled);
+  $('focus-mode').setAttribute('aria-pressed', String(enabled)); layout(); current()?.terminal?.focus();
+}
+$('focus-mode').onclick = () => setFocusMode(!document.body.classList.contains('focus-mode'));
+$('exit-focus').onclick = () => setFocusMode(false);
+// Mostra "Sair do foco" com o mouse perto do topo; ouvir em captura não interfere nos eventos da sessão remota.
+document.addEventListener('mousemove', event => {
+  document.body.classList.toggle('reveal-exit', event.clientY < 40);
+  // Barra da sessão gráfica: aparece com o mouse nos 48px superiores do painel (ou sobre ela).
+  for (const item of sessions.values()) if (item.graphical) { const r = item.pane.getBoundingClientRect(); item.pane.classList.toggle('show-bar', event.clientY >= r.top && event.clientY < r.top + 48 && event.clientX >= r.left && event.clientX <= r.right); }
+}, true);
+// Captura antes do xterm/RDP; Esc continua disponível para a sessão remota.
+document.addEventListener('keydown', event => {
+  if (document.querySelector('dialog[open]')) return;
+  const lateral = event.ctrlKey && event.shiftKey && !event.altKey && event.code === 'KeyB'; // Ctrl+B fica livre para o tmux e a sessão remota
+  const foco = event.key === 'F11' && !event.ctrlKey && !event.altKey && !event.shiftKey;
+  if (!lateral && !foco) return;
+  event.preventDefault(); event.stopImmediatePropagation(); if (event.repeat) return;
+  if (lateral) $('toggle-sidebar').click(); else $('focus-mode').click();
+}, true);
+
 document.addEventListener('keydown', event => {
   if (!event.ctrlKey || !event.shiftKey || document.querySelector('dialog[open]')) return;
   if (event.code === 'KeyT') { event.preventDefault(); safe(() => openSession(localProfile()))(); }
