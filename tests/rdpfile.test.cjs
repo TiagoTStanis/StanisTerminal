@@ -10,7 +10,8 @@ const USER = String.raw`EMPRESA\usuario`; // domínio\usuário, com barra invert
 const REMOTEAPP = [
   'screen mode id:i:2', 'full address:s:rds01.empresa.local:3390', 'username:s:' + USER,
   'remoteapplicationmode:i:1', 'remoteapplicationprogram:s:||calc', 'remoteapplicationname:s:Calculadora',
-  'remoteapplicationcmdline:s:/modo simples', 'shell working directory:s:%USERPROFILE%', 'gatewayhostname:s:rdg.empresa.com'
+  'remoteapplicationcmdline:s:/modo simples', 'shell working directory:s:%USERPROFILE%', 'gatewayhostname:s:rdg.empresa.com',
+  'loadbalanceinfo:s:tsv://MS Terminal Services Plugin.1.Colecao'
 ].join('\r\n');
 
 test('.rdp de RemoteApp: servidor, porta, usuário com domínio e programa', () => {
@@ -19,6 +20,7 @@ test('.rdp de RemoteApp: servidor, porta, usuário com domínio e programa', () 
     { name: 'Calculadora', host: 'rds01.empresa.local', port: 3390, username: USER, group: 'RemoteApps' });
   assert.deepEqual(row.remoteApp, { program: '||calc', name: 'Calculadora', args: '/modo simples', workdir: '%USERPROFILE%' });
   assert.equal(row.gateway, 'rdg.empresa.com');
+  assert.equal(row.loadBalanceInfo, 'tsv://MS Terminal Services Plugin.1.Colecao');
 });
 
 test('.rdp comum (sem RemoteApp), IPv6 e "server port"', () => {
@@ -51,4 +53,12 @@ test('perfil RDP guarda o RemoteApp e descarta programa vazio ou com quebra de l
   assert.equal(profile({ type: 'rdp', name: 'R', host: 'rds01', remoteApp: { program: '  ' } }).remoteApp, undefined);
   assert.throws(() => profile({ type: 'rdp', name: 'R', host: 'rds01', remoteApp: { program: '||a\nb' } }));
   assert.equal(profile({ type: 'ssh', name: 'S', host: 'h', remoteApp: { program: '||calc' } }).remoteApp, undefined);
+});
+
+test('perfil RDP guarda o loadbalanceinfo (ASCII imprimível, até 238) e recusa valor inválido', () => {
+  assert.equal(profile({ type: 'rdp', name: 'R', host: 'rds01', loadBalanceInfo: ' tsv://MS Terminal Services Plugin.1.Colecao ' }).loadBalanceInfo, 'tsv://MS Terminal Services Plugin.1.Colecao');
+  assert.equal(profile({ type: 'rdp', name: 'R', host: 'rds01', loadBalanceInfo: '' }).loadBalanceInfo, undefined);
+  assert.throws(() => profile({ type: 'rdp', name: 'R', host: 'rds01', loadBalanceInfo: 'x'.repeat(239) }), /Load balance/);
+  assert.throws(() => profile({ type: 'rdp', name: 'R', host: 'rds01', loadBalanceInfo: 'coleção' }), /Load balance/);
+  assert.equal(profile({ type: 'ssh', name: 'S', host: 'h', loadBalanceInfo: 'tsv://x' }).loadBalanceInfo, undefined);
 });

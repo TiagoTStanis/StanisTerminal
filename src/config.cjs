@@ -51,6 +51,12 @@ function profile(input) {
       const line = (value, max) => { const v = text(value || '', max); if (/[\r\n]/.test(v)) throw new Error('RemoteApp inválido.'); return v; };
       p.remoteApp = { program: line(app.program.trim(), 1024), name: line(app.name, 200), args: line(app.args, 2048), workdir: line(app.workdir, 1024) };
     }
+    // loadbalanceinfo do .rdp, enviado no X.224 como routing token: ASCII imprimível, até 238 caracteres.
+    const lb = typeof input.loadBalanceInfo === 'string' ? input.loadBalanceInfo.trim() : '';
+    if (p.type === 'rdp' && lb) {
+      if (lb.length > 238 || !/^[\x20-\x7e]+$/.test(lb)) throw new Error('Load balance info inválido (use só caracteres ASCII, até 238).');
+      p.loadBalanceInfo = lb;
+    }
   }
   return p;
 }

@@ -98,7 +98,7 @@ function localProfile(shell = 'powershell') { return { type: 'local', shell, nam
 async function sessionForm(existing = {}) {
   const type = existing.type || 'ssh';
   let lastType = type;
-  const result = await form({ title: existing.id ? 'Editar sessão' : 'Nova sessão', message: 'Preencha os dados da conexão. As opções extras ficam em Avançados.', accept: 'Salvar sessão', advancedFields: ['group', 'newGroup', 'cwd', 'port', 'remoteAppProgram', 'keyPath', 'useAgent', 'agentForward', 'proxyHost', 'proxyPort', 'jumpId'], fields: [
+  const result = await form({ title: existing.id ? 'Editar sessão' : 'Nova sessão', message: 'Preencha os dados da conexão. As opções extras ficam em Avançados.', accept: 'Salvar sessão', advancedFields: ['group', 'newGroup', 'cwd', 'port', 'remoteAppProgram', 'loadBalanceInfo', 'keyPath', 'useAgent', 'agentForward', 'proxyHost', 'proxyPort', 'jumpId'], fields: [
     { name: 'name', label: 'Nome', value: existing.name || '', required: true }, { name: 'group', label: 'Pasta', value: existing.group || 'Minhas sessões', options: [...new Set(['Minhas sessões', ...(state.config.folders || []), ...state.config.profiles.map(p => p.group)])].sort((a, b) => a.localeCompare(b)).map(f => ({ value: f, label: f })) },
     { name: 'type', label: 'Protocolo', value: type, options: [{ value: 'ssh', label: 'SSH + SFTP' }, { value: 'local', label: 'Terminal local' }, { value: 'rdp', label: 'RDP integrado' }, { value: 'vnc', label: 'VNC integrado' }, { value: 'telnet', label: 'Telnet' }, { value: 'serial', label: 'Serial (8N1)' }, { value: 'x11', label: 'Servidor X11 local' }, { value: 'ssh-x11', label: 'SSH com aplicativos X11' }, { value: 'xdmcp', label: 'Área de trabalho XDMCP' }, { value: 'rlogin', label: 'Rlogin (sem criptografia)' }, { value: 'rsh', label: 'Rsh — executar comando (sem criptografia)' }] },
     { name: 'shell', label: 'Shell local', value: existing.shell || 'powershell', options: ['powershell', 'cmd', 'bash', 'wsl', 'busybox', 'msys2'] },
@@ -107,6 +107,7 @@ async function sessionForm(existing = {}) {
     { name: 'username', label: 'Usuário / domínio\\usuário', value: existing.username || '' },
     { name: 'password', label: state.secrets?.[existing.id] ? 'Senha (guardada; deixe vazio para manter)' : 'Senha (opcional; guardada com criptografia do Windows)', type: 'password', wide: true },
     { name: 'remoteAppProgram', label: 'Programa RemoteApp (opcional, ex.: ||calc — abre só o programa)', value: existing.remoteApp?.program || '', wide: true },
+    { name: 'loadBalanceInfo', label: 'Load balance info (linha loadbalanceinfo do .rdp, para servidores com Connection Broker)', value: existing.loadBalanceInfo || '', wide: true },
     { name: 'resolution', label: 'Resolução da tela remota', value: existing.resolution || '', options: [{ value: '', label: 'Ajustar à janela' }, ...['1024x768', '1280x720', '1280x800', '1366x768', '1440x900', '1600x900', '1920x1080'].map(v => ({ value: v, label: v.replace('x', ' × ') }))] },
     { name: 'keyPath', label: 'Arquivo de chave privada SSH (opcional)', value: existing.keyPath || '', wide: true },
     { name: 'useAgent', label: 'Usar o agente SSH do Windows (chaves ficam no agente, sem senha)', type: 'checkbox', value: !!existing.useAgent, wide: true },
@@ -120,7 +121,7 @@ async function sessionForm(existing = {}) {
   ], onChange: f => {
     const selected = f.elements.type.value;
     if (selected !== lastType) { f.elements.port.value = ''; lastType = selected; }
-    const show = ['name', 'group', 'newGroup', 'type', ...(selected === 'x11' ? [] : selected === 'xdmcp' ? ['host'] : selected === 'local' ? ['shell', 'cwd'] : selected === 'serial' ? ['device', 'baudRate'] : ['ssh', 'ssh-x11'].includes(selected) ? ['host', 'port', 'username', 'password', 'keyPath', 'useAgent', 'agentForward', 'proxyHost', 'proxyPort', 'jumpId'] : selected === 'rdp' ? ['host', 'port', 'username', 'password', 'resolution', 'remoteAppProgram'] : selected === 'rlogin' ? ['host', 'port', 'username'] : selected === 'rsh' ? ['host', 'port', 'username', 'command'] : ['host', 'port'])];
+    const show = ['name', 'group', 'newGroup', 'type', ...(selected === 'x11' ? [] : selected === 'xdmcp' ? ['host'] : selected === 'local' ? ['shell', 'cwd'] : selected === 'serial' ? ['device', 'baudRate'] : ['ssh', 'ssh-x11'].includes(selected) ? ['host', 'port', 'username', 'password', 'keyPath', 'useAgent', 'agentForward', 'proxyHost', 'proxyPort', 'jumpId'] : selected === 'rdp' ? ['host', 'port', 'username', 'password', 'resolution', 'remoteAppProgram', 'loadBalanceInfo'] : selected === 'rlogin' ? ['host', 'port', 'username'] : selected === 'rsh' ? ['host', 'port', 'username', 'command'] : ['host', 'port'])];
     for (const field of $('dialog-fields').querySelectorAll('[data-field]')) { field.hidden = !show.includes(field.dataset.field); for (const input of field.querySelectorAll('input,select')) input.disabled = field.hidden; }
     f.elements.host.required = show.includes('host');
     f.elements.command.required = selected === 'rsh';
@@ -275,8 +276,8 @@ function rdpErrorText(error) {
   }
   // RemoteApp: explica em português os dois casos comuns.
   if (/does not support required RemoteApp/i.test(text)) return 'este servidor não oferece RemoteApp. É preciso um Windows Server com Serviços de Área de Trabalho Remota publicando o programa (ou RemoteApp liberado no registro).';
-  const refused = /não abriu o RemoteApp (.*?) \((\w+)/.exec(text);
-  if (refused) return `o servidor recusou abrir ${refused[1]} (${{ NotInAllowlist: 'programa não publicado / fora da lista permitida', FileNotFound: 'programa não encontrado no servidor', SessionLocked: 'sessão bloqueada', HookNotLoaded: 'componente RemoteApp do servidor não carregou' }[refused[2]] || refused[2]}).`;
+  const refused = /não abriu o RemoteApp (.*) \((\w+), código/.exec(text);
+  if (refused) return `o servidor recusou abrir ${refused[1]} (${{ NotInAllowlist: 'programa não publicado / fora da lista permitida', FileNotFound: 'programa não encontrado no servidor', SessionLocked: 'sessão bloqueada', HookNotLoaded: 'componente RemoteApp do servidor não carregou', Fail: 'o programa falhou ao iniciar no servidor', DecodeFailed: 'o servidor não entendeu o pedido' }[refused[2]] || refused[2]}).`;
   return text;
 }
 async function openRdp(item, result) {
@@ -298,6 +299,7 @@ async function openRdp(item, result) {
   builder.desktopSize(new rdp.DesktopSize(width, height));
   builder.renderCanvas(canvas);
   // RemoteApp (.rdp do RD Web): o servidor abre só o programa, desenhado no canvas desta aba.
+  if (result.profile.loadBalanceInfo) builder.extension(new rdp.Extension('load_balance_info', result.profile.loadBalanceInfo));
   if (remoteApp) builder.extension(new rdp.Extension('remote_app', { program: remoteApp.program, args: remoteApp.args || '', work_dir: remoteApp.workdir || '' }));
   // Escala o canvas para caber no painel mantendo a proporção da tela remota (que pode diferir da pedida
   // e mudar no meio da sessão); o mouse converte de volta pelo getBoundingClientRect.

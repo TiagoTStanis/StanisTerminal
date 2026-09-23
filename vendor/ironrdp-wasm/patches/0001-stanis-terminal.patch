@@ -1187,7 +1187,7 @@ index 00000000..f0ce1d32
 +}
 +
 diff --git a/crates/ironrdp-web/src/session.rs b/crates/ironrdp-web/src/session.rs
-index 4a6ed6b5..b28e6543 100644
+index 4a6ed6b5..e884b825 100644
 --- a/crates/ironrdp-web/src/session.rs
 +++ b/crates/ironrdp-web/src/session.rs
 @@ -13,6 +13,9 @@ use futures_util::{AsyncWriteExt as _, FutureExt as _, StreamExt as _, select};
@@ -1200,27 +1200,31 @@ index 4a6ed6b5..b28e6543 100644
  use iron_remote_desktop::{CursorStyle, DesktopSize, Extension, IronErrorKind};
  use ironrdp::cliprdr::CliprdrClient;
  use ironrdp::cliprdr::backend::ClipboardMessage;
-@@ -97,6 +100,8 @@ struct SessionBuilderInner {
+@@ -97,6 +100,10 @@ struct SessionBuilderInner {
      enable_server_pointer: bool,
      legacy_graphics: bool,
      outbound_message_size_limit: Option<usize>,
 +    /// Programa RemoteApp (RAIL) a abrir no lugar da área de trabalho.
 +    remote_app: Option<rail_pdu::ExecutePdu>,
++    /// loadbalanceinfo do .rdp (ex.: tsv://...): diz ao Connection Broker em qual coleção abrir a sessão.
++    load_balance_info: Option<String>,
  }
  
  impl Default for SessionBuilderInner {
-@@ -142,6 +147,7 @@ impl Default for SessionBuilderInner {
+@@ -142,6 +149,8 @@ impl Default for SessionBuilderInner {
              enable_server_pointer: true,
              legacy_graphics: false,
              outbound_message_size_limit: None,
 +            remote_app: None,
++            load_balance_info: None,
          }
      }
  }
-@@ -260,6 +266,16 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+@@ -260,6 +269,17 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
              |kdc_proxy_url: String| { self.0.borrow_mut().kdc_proxy_url = Some(kdc_proxy_url) };
              |display_control: bool| { self.0.borrow_mut().use_display_control = display_control };
              |enable_credssp: bool| { self.0.borrow_mut().enable_credssp = enable_credssp };
++            |load_balance_info: String| { self.0.borrow_mut().load_balance_info = (!load_balance_info.is_empty()).then_some(load_balance_info) };
 +            |remote_app: JsValue| {
 +                let field = |name: &str| js_sys::Reflect::get(&remote_app, &JsValue::from_str(name)).ok().and_then(|v| v.as_string()).unwrap_or_default();
 +                let program = field("program");
@@ -1234,25 +1238,27 @@ index 4a6ed6b5..b28e6543 100644
              |enable_server_pointer: bool| { self.0.borrow_mut().enable_server_pointer = enable_server_pointer };
              |legacy_graphics: bool| { self.0.borrow_mut().legacy_graphics = legacy_graphics };
              |outbound_message_size_limit: f64| {
-@@ -434,6 +450,9 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+@@ -434,6 +454,10 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
          let enable_credssp = self.0.borrow().enable_credssp;
          config.enable_credssp = enable_credssp;
  
 +        let remote_app = self.0.borrow().remote_app.clone();
++        let load_balance_info = self.0.borrow().load_balance_info.clone();
 +        config.remote_application_mode = remote_app.is_some();
 +
          let enable_server_pointer = self.0.borrow().enable_server_pointer;
          config.enable_server_pointer = enable_server_pointer;
  
-@@ -524,6 +543,7 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+@@ -524,6 +548,8 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
              computer_name: client_name.clone(),
              use_display_control,
              input_events_tx: input_events_tx.clone(),
 +            remote_app,
++            load_balance_info,
          })
          .await?;
  
-@@ -709,6 +729,7 @@ impl iron_remote_desktop::Session for Session {
+@@ -709,6 +735,7 @@ impl iron_remote_desktop::Session for Session {
          let activation_factory = connection_result.activation_factory;
  
          let mut active_stage = ActiveStageBuilder {
@@ -1260,7 +1266,7 @@ index 4a6ed6b5..b28e6543 100644
              static_channels: connection_result.static_channels,
              user_channel_id: connection_result.user_channel_id,
              io_channel_id: connection_result.io_channel_id,
-@@ -947,6 +968,34 @@ impl iron_remote_desktop::Session for Session {
+@@ -947,6 +974,34 @@ impl iron_remote_desktop::Session for Session {
                  }
              };
  
@@ -1295,7 +1301,7 @@ index 4a6ed6b5..b28e6543 100644
              // `process()` may have resized `image` to follow ResetGraphics in the same
              // frame. The canvas has to match *before* the GraphicsUpdate from that frame
              // is drawn.
-@@ -1099,7 +1148,7 @@ impl iron_remote_desktop::Session for Session {
+@@ -1099,7 +1154,7 @@ impl iron_remote_desktop::Session for Session {
                              if let ConnectionActivationState::Finalized {
                                  desktop_size,
                                  share_id,
@@ -1304,7 +1310,7 @@ index 4a6ed6b5..b28e6543 100644
                                  enable_server_pointer,
                                  pointer_software_rendering,
                                  static_channel_chunk_size,
-@@ -1129,6 +1178,7 @@ impl iron_remote_desktop::Session for Session {
+@@ -1129,6 +1184,7 @@ impl iron_remote_desktop::Session for Session {
                                  ) {
                                      return Err(IronError::from(anyhow::anyhow!("invalid static channel chunk size")));
                                  }
@@ -1312,7 +1318,7 @@ index 4a6ed6b5..b28e6543 100644
                                  active_stage.set_window_support_level(window_support_level);
                                  break 'activation_seq;
                              }
-@@ -1193,18 +1243,8 @@ impl iron_remote_desktop::Session for Session {
+@@ -1193,18 +1249,8 @@ impl iron_remote_desktop::Session for Session {
          caps_lock: bool,
          kana_lock: bool,
      ) -> Result<(), Self::Error> {
@@ -1332,24 +1338,26 @@ index 4a6ed6b5..b28e6543 100644
      }
  
      fn shutdown(&self) -> Result<(), Self::Error> {
-@@ -1675,6 +1715,8 @@ struct ConnectParams {
+@@ -1675,6 +1721,9 @@ struct ConnectParams {
      use_display_control: bool,
      /// Lets the EGFX handler report server-driven desktop resizes to the event loop.
      input_events_tx: mpsc::UnboundedSender<RdpInputEvent>,
 +    /// Programa RemoteApp: liga o canal RAIL e fica na fila até o handshake do servidor.
 +    remote_app: Option<rail_pdu::ExecutePdu>,
++    load_balance_info: Option<String>,
  }
  
  fn default_printer_driver_name() -> String {
-@@ -1726,6 +1768,7 @@ async fn connect(
+@@ -1726,6 +1775,8 @@ async fn connect(
          computer_name,
          use_display_control,
          input_events_tx,
 +        remote_app,
++        load_balance_info,
      }: ConnectParams,
  ) -> Result<(connector::ConnectionResult, WebSocket), IronError> {
      let mut framed = ironrdp_futures::LocalFuturesFramed::new(ws);
-@@ -1733,7 +1776,19 @@ async fn connect(
+@@ -1733,7 +1784,23 @@ async fn connect(
      // In web browser environments, we do not have an easy access to the local address of the socket.
      let dummy_client_addr = core::net::SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 33899));
  
@@ -1365,6 +1373,10 @@ index 4a6ed6b5..b28e6543 100644
      let mut connector = ClientConnector::new(config, dummy_client_addr);
 +    if let Some(rail) = rail_client {
 +        connector.attach_static_channel(rail);
++    }
++    // Enviado como routing token no X.224, como o mstsc faz com o loadbalanceinfo do .rdp.
++    if let Some(info) = load_balance_info {
++        connector = connector.with_load_balance_info(info);
 +    }
  
      if let Some(clipboard_backend) = clipboard_backend {

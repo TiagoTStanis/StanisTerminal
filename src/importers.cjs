@@ -98,6 +98,8 @@ function parseRdp(contents, file = 'Conexão.rdp') {
   const appName = values['remoteapplicationname'] || '';
   return { name: (program && appName) || base, group: program ? 'RemoteApps' : 'Importado de .rdp', type: 'rdp', host, port, username: values['username'] || '',
     ...(program ? { remoteApp: { program, name: appName || base, args: values['remoteapplicationcmdline'] || '', workdir: values['shell working directory'] || '' } } : {}),
+    // loadbalanceinfo (ex.: tsv://MS Terminal Services Plugin.1.Colecao) indica ao Connection Broker a coleção certa.
+    ...(values['loadbalanceinfo'] ? { loadBalanceInfo: values['loadbalanceinfo'] } : {}),
     gateway: values['gatewayhostname'] || '' };
 }
 function rdpRows(parsed, source) {
