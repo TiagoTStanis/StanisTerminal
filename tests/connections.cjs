@@ -210,6 +210,13 @@ function sftpServer(sftp) {
     assert.ok(cutAt >= 0 && vAt > cutAt, `Ctrl+V deveria mandar o texto e depois o "v". Recebido: ${JSON.stringify(vncEvents)}`);
     assert.equal(vncEvents.filter(e => e === 'key:76:1').length, 1, `o "v" deveria ir uma vez só. Recebido: ${JSON.stringify(vncEvents)}`);
     console.log('PASS: Ctrl+V na tela VNC manda o texto copiado no Windows antes das teclas de colar.');
+    // Clipboard do VNC clássico é Latin-1: pontuação tipográfica vira o equivalente simples (não "?").
+    vncEvents.length = 0;
+    await app.evaluate(({ clipboard }) => clipboard.writeText('a—b “c” d… ação'));
+    await page.locator('.graphic-mount canvas').click(); await page.keyboard.press('Control+V');
+    await new Promise(resolve => setTimeout(resolve, 800));
+    assert.ok(vncEvents.includes('cut:a-b "c" d... ação'), `texto convertido para Latin-1. Recebido: ${JSON.stringify(vncEvents)}`);
+    console.log('PASS: VNC converte travessão, aspas curvas e reticências para Latin-1 (sem virar "?").');
     // Sincronização automática: copiar no Windows com a aba VNC ativa chega ao servidor sem apertar nada.
     vncEvents.length = 0;
     await app.evaluate(({ clipboard }) => clipboard.writeText('Sincronizado sozinho'));

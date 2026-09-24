@@ -23,7 +23,7 @@ const CATALOG = {
     url: 'https://www.tightvnc.com/download/2.8.88/tightvnc-2.8.88-gpl-setup-64bit.msi',
     sha256: 'fa86d817ac29c5ffe1e8e7095e738d9ba5ca28aa62304ac234580916622a8ca2', maxBytes: 6 * 1024 * 1024,
     msi: true, file: path.join('PFiles', 'TightVNC', 'tvnserver.exe'), signer: 'OOO GlavSoft',
-    verify: [path.join('PFiles', 'TightVNC', 'tvnserver.exe'), path.join('PFiles', 'TightVNC', 'screenhooks64.dll'), path.join('PFiles', 'TightVNC', 'hookldr.exe')],
+    verify: [path.join('PFiles', 'TightVNC', 'tvnserver.exe'), path.join('PFiles', 'TightVNC', 'screenhooks64.dll'), path.join('PFiles', 'TightVNC', 'hookldr.exe'), path.join('PFiles', 'TightVNC', 'tvnviewer.exe')],
     source: 'https://www.tightvnc.com/ — hash calculado sobre o instalador com assinatura Authenticode válida de OOO GlavSoft; a assinatura dos executáveis é conferida de novo após extrair'
   },
   msys2: {

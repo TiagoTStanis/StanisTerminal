@@ -293,6 +293,19 @@ function register() {
     network.servers.set(mirror.id, { id: mirror.id, name, kind: 'mirror', server: { close: () => mirror.stop(), closeAllConnections() {} } });
     return { id: mirror.id, name };
   });
+  // Abre a sessão VNC no TightVNC Viewer (janela própria, com a transferência de arquivos do TightVNC):
+  // usa o instalado no Windows; senão, o do pacote oficial que o app já baixa (assinatura conferida).
+  // Só host e porta: a senha é pedida pelo próprio Viewer, sem passar por linha de comando nem arquivo.
+  handle('vnc:openViewer', async value => {
+    const p = profile(value); if (p.type !== 'vnc') throw new Error('Só para sessões VNC.');
+    const installed = [process.env.ProgramFiles, process.env['ProgramFiles(x86)']].filter(Boolean).map(dir => path.join(dir, 'TightVNC', 'tvnviewer.exe')).find(file => fs.existsSync(file));
+    let viewer = installed;
+    if (!viewer) { await tools.install('tightvnc'); viewer = path.join(tools.root, 'tightvnc', 'PFiles', 'TightVNC', 'tvnviewer.exe'); }
+    if (!fs.existsSync(viewer)) throw new Error('TightVNC Viewer não encontrado.');
+    const target = p.host.includes(':') ? `[${p.host}]::${p.port}` : `${p.host}::${p.port}`;
+    require('node:child_process').spawn(viewer, [target], { detached: true, stdio: 'ignore', windowsHide: false }).unref();
+    return { viewer: installed ? 'instalado' : 'do app' };
+  });
   handle('vnc:start', async options => {
     const vncPort = Number(options?.port) || 5900; const exe = await tools.install('tightvnc');
     const server = await startVnc({ exe, port: vncPort, password: typeof options?.password === 'string' ? options.password : '' });

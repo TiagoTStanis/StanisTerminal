@@ -6,7 +6,7 @@ O projeto se inspira no uso de sessões do MobaXterm e do WindTerm. É um aplica
 
 ## Para usar
 
-Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.12.0-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
+Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.12.1-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
 
 **Evite a versão de arquivo único** (`StanisTerminal-*-win-x64-PORTATIL-LENTO-usar-o-zip.exe`): ela extrai os componentes a cada execução — não só na primeira — e pode levar mais de um minuto toda vez que você abrir. Use-a apenas para testar rapidamente em um computador onde você não vai instalar nada; para uso do dia a dia, use sempre o ZIP extraído. Não precisa instalar Node.js, Python ou Electron em nenhuma das distribuições. Use Windows 10/11 de 64 bits e uma pasta em que você possa salvar arquivos, como Documentos. Consulte os arquivos já publicados em [Releases](https://github.com/TiagoTStanis/StanisTerminal/releases); gerar um pacote local não o publica automaticamente. Para arquivos publicados, confira o SHA-256 e a assinatura GPG do release (veja [como verificar](docs/VERIFICAR-ASSINATURA.md); impressão digital `A345 44C3 43F2 E16B EF64  C7A4 95A1 3721 ED00 B9E6`).
 
@@ -19,7 +19,11 @@ O [manual de uso](docs/LEIA-ME.md) explica backups, X11, atalhos e mensagens com
 
 ## Recursos
 
-**Novo na 1.12.0 — realce de sintaxe com as regras prontas do ChromaTerm:** o realce caseiro da 1.10.3 foi substituído pelas regras do [ChromaTerm](https://github.com/hSaria/ChromaTerm) (MIT), um colorizador de terminal mantido pela comunidade. Em Preferências → "Realce de sintaxe" há três opções:
+**Novo na 1.12.1 — VNC com TightVNC:**
+- **Colar texto com travessão, aspas curvas e reticências:** o clipboard do VNC clássico (TightVNC, UltraVNC) só aceita Latin-1, e esses caracteres, comuns em textos do Word, Outlook e Teams, viravam `?`. Agora são trocados pelos equivalentes simples (— vira -, “ ” vira ", … vira ...). Acentos continuam como estão.
+- **Abrir no TightVNC Viewer:** botão na barra do VNC e item no menu da sessão. Abre a mesma conexão no cliente oficial do TightVNC, numa janela própria, com a transferência de arquivos e as opções do próprio TightVNC. Usa o Viewer instalado no Windows; se não houver, usa o do pacote oficial que o app já baixa (hash e assinatura conferidos). A senha é pedida pelo próprio Viewer: nenhuma senha passa por linha de comando nem por arquivo.
+
+**Da 1.12.0 — realce de sintaxe com as regras prontas do ChromaTerm:** o realce caseiro da 1.10.3 foi substituído pelas regras do [ChromaTerm](https://github.com/hSaria/ChromaTerm) (MIT), um colorizador de terminal mantido pela comunidade. Em Preferências → "Realce de sintaxe" há três opções:
 - **Rede** (padrão): regras da comunidade para Cisco, Juniper e rede (interfaces, up/down, err-disabled, syslog por severidade, OSPF/BGP/EIGRP, spanning tree, contadores de erro) + as gerais.
 - **Geral:** IPs, MACs, datas, horas, números, tamanhos (10G, 1.5Gbps), URLs e palavras boas/ruins.
 - **Desligado.**

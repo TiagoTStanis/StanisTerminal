@@ -220,6 +220,10 @@ async function openSession(profile) {
       // writing: enquanto o texto do servidor ainda está sendo gravado no Windows, não lê o clipboard (leria
       // o texto antigo e o mandaria de volta, sobrescrevendo o que o servidor acabou de copiar).
       let lastText = null, writing = 0;
+      // O clipboard do VNC clássico (TightVNC, UltraVNC) só aceita Latin-1: travessão, aspas curvas,
+      // reticências etc. (comuns em textos do Word/Outlook/Teams) viravam "?". Troca pelos equivalentes simples.
+      const LATIN1 = { '\u2013': '-', '\u2014': '-', '\u2212': '-', '\u2018': "'", '\u2019': "'", '\u201a': "'", '\u201c': '"', '\u201d': '"', '\u201e': '"', '\u2026': '...', '\u2022': '*', '\u00a0': ' ', '\u2009': ' ', '\u200b': '', '\u2192': '->', '\u2190': '<-' };
+      const toLatin1 = text => text.replace(/[\u0100-\uffff]/g, char => LATIN1[char] ?? '?');
       item.rfb.addEventListener('clipboard', event => {
         lastText = event.detail.text; writing++;
         safe(async () => { try { await call('clipboard:write', event.detail.text); } finally { writing--; } })();
@@ -227,7 +231,7 @@ async function openSession(profile) {
       const syncClipboard = async (force = false) => {
         if (item.ended || !item.rfb || writing) return;
         const text = await call('clipboard:read').catch(() => '');
-        if (text && (force || text !== lastText)) { lastText = text; item.rfb.clipboardPasteFrom(text); }
+        if (text && (force || text !== lastText)) { lastText = text; item.rfb.clipboardPasteFrom(toLatin1(text)); }
       };
       const sendClipboard = () => safe(() => syncClipboard(true))();
       item.clipboardTimer = setInterval(() => { if (activeId === item.id && document.hasFocus()) safe(syncClipboard)(); }, 1000);
@@ -256,6 +260,7 @@ async function openSession(profile) {
       bar.append(
         button('⌨ Ctrl+Alt+Del', () => item.rfb.sendCtrlAltDel()),
         button('📋 Colar texto', sendClipboard),
+        button('↗ TightVNC Viewer', async () => { const r = await call('vnc:openViewer', profile); toast(`Abrindo no TightVNC Viewer (${r.viewer}). A senha é pedida por ele.`); }),
         // O protocolo VNC não transfere arquivos: abre o painel Arquivos pelo canal paralelo de rede do
         // mesmo host (compartilhamento C$ no Windows, SSH no Linux — ver remotefiles.cjs).
         (item.viewButton = button('', () => setView(item.vncView === 'fit' ? 'real' : 'fit'))),
