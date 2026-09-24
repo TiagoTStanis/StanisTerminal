@@ -181,7 +181,9 @@ export function setup(ctx) {
     for (const job of live.transfers.slice(-8)) {
       const row = elem('div', '', 'transfer ' + job.status.replace(/\s/g, '-'));
       row.append(elem('span', `${job.direction === 'upload' ? '↑' : '↓'} ${job.name}`, 'transfer-name'));
-      row.append(elem('small', job.error ? `${job.status}: ${job.error}` : job.total > 1 ? `${job.status} ${job.done}/${job.total}` : job.status));
+      const percent = job.size && ['enviando', 'baixando'].includes(job.status) ? ` ${Math.min(100, Math.floor((job.bytes || 0) * 100 / job.size))}%` : '';
+      row.append(elem('small', job.error ? `${job.status}: ${job.error}` : (job.total > 1 ? `${job.status} ${job.done}/${job.total}` : job.status) + percent));
+      if (percent) { const bar = elem('div', '', 'transfer-bar'); bar.style.setProperty('--done', percent.trim()); row.append(bar); }
       if (['na fila', 'enviando', 'baixando'].includes(job.status)) row.append(button('✕', () => call('transfer:cancel', job.id)));
       panel.append(row);
     }
@@ -191,9 +193,9 @@ export function setup(ctx) {
     const finished = list.some(j => j.status === 'concluída' && !before.some(b => b.id === j.id && b.status === 'concluída'));
     if (finished) safe(() => ctx.reloadFiles())();
   });
-  const uploadFolder = button('Enviar pasta', async () => { const fs_ = ctx.fileState; if (fs_.kind === 'local') throw new Error('Escolha SFTP ou FTP para enviar pastas.'); await call('transfer:folder', fs_.kind, fs_.id, 'upload', fs_.path); toast('Pasta na fila de transferência.'); });
-  uploadFolder.id = 'files-upload-folder'; $('files-upload').after(uploadFolder);
-  ctx.setFileMode = kind => { uploadFolder.hidden = kind === 'local'; followButton.hidden = trackButton.hidden = kind !== 'sftp'; };
+  const uploadFolder = button('↑ Pasta', async () => { const fs_ = ctx.fileState; if (fs_.kind === 'local' && !fs_.network) throw new Error('Escolha SFTP ou FTP para enviar pastas.'); await call('transfer:folder', fs_.kind, fs_.id, 'upload', fs_.path); toast('Pasta na fila de transferência.'); });
+  uploadFolder.id = 'files-upload-folder'; uploadFolder.title = 'Enviar uma pasta inteira'; $('files-upload').after(uploadFolder);
+  ctx.setFileMode = kind => { uploadFolder.hidden = kind === 'local' && !ctx.fileState.network; followButton.hidden = trackButton.hidden = kind !== 'sftp'; };
   uploadFolder.hidden = followButton.hidden = trackButton.hidden = true;
   ctx.downloadFolder = entry => { const fs_ = ctx.fileState; return call('transfer:folder', fs_.kind, fs_.id, 'download', entry.path).then(id => id && toast('Pasta na fila de transferência.')); };
 
@@ -203,10 +205,10 @@ export function setup(ctx) {
   dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drop'));
   dropZone.addEventListener('drop', safe(async event => {
     event.preventDefault(); dropZone.classList.remove('drop'); const fs_ = ctx.fileState;
-    if (fs_.kind === 'local') throw new Error('Abra SFTP ou FTP para enviar arquivos arrastados.');
+    if (fs_.kind === 'local' && !fs_.network) throw new Error('Abra os arquivos de uma sessão (SFTP, TightVNC, Rede ou FTP) para enviar arquivos arrastados.');
     const files = [...event.dataTransfer.files].slice(0, 50); if (!files.length) return;
     if (!await form({ title: `Enviar ${files.length} item(ns)?`, message: `Destino: ${fs_.path}\n${files.map(f => f.name).join('\n')}`, fields: [], accept: 'Enviar' })) return;
-    for (const file of files) call('transfer:add', { kind: fs_.kind, id: fs_.id, direction: 'upload', local: api.pathFor(file), remote: fs_.path.replace(/\/$/, '') + '/' + file.name }).catch(error => toast(error.message));
+    for (const file of files) call('transfer:add', { kind: fs_.kind, id: fs_.id, direction: 'upload', local: api.pathFor(file), remote: fs_.path.replace(/[\\/]$/, '') + (fs_.kind === 'local' ? '\\' : '/') + file.name }).catch(error => toast(error.message));
   }));
 
   // ---------- Ferramentas: túneis e servidores ----------

@@ -172,5 +172,5 @@ export function setupTree(ctx) {
   }
   $('new-folder').onclick = safe(async () => { const name = await promptName('Nova pasta'); if (name) { apply(await call('folder:create', name)); collapsed.delete('@mine'); persist(); render(); } });
   $('sessions-list').oncontextmenu = event => { if (event.target === $('sessions-list')) { event.preventDefault(); openMenu(event.clientX, event.clientY, [{ label: 'Nova sessão…', action: () => sessionForm() }, { label: 'Nova pasta…', action: () => $('new-folder').click() }]); } };
-  return { render };
+  return { render, openMenu };
 }

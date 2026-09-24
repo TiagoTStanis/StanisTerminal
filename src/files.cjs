@@ -13,6 +13,7 @@ class Files {
     const ft = await TightFT.connect({ host: host(options.host), port: port(options.port, 5900), password: typeof options.password === 'string' ? options.password : '' });
     const id = randomUUID(); this.tight.set(id, ft); return { id, path: '/' };
   }
+  tightClose(id) { this.tight.get(id)?.close(); this.tight.delete(id); }
   tightClient(id) { const ft = this.tight.get(id); if (!ft) throw new Error('Conexão de arquivos do TightVNC encerrada. Abra de novo pelo botão Arquivos.'); return ft; }
   async remote(id) {
     const item = this.sessions.get(id);
@@ -33,7 +34,7 @@ class Files {
       // Caminhos no formato do TightVNC: "/" lista os discos, "/C:/pasta" é uma pasta.
       const folder = !directory || directory === '/' ? '/' : '/' + directory.replace(/^\/+|\/+$/g, '');
       const rows = await this.tightClient(id).list(folder);
-      return { path: folder, parent: folder === '/' ? '/' : path.posix.dirname(folder), rows: rows.map(x => ({ name: x.name, path: path.posix.join(folder, x.name), directory: x.directory, size: x.size })) };
+      return { path: folder, parent: folder === '/' ? '/' : path.posix.dirname(folder), rows: rows.map(x => ({ name: x.name, path: path.posix.join(folder, x.name), directory: x.directory, size: x.size, modified: x.modified })) };
     }
     if (kind === 'local') {
       const absolute = path.resolve(directory);
@@ -41,7 +42,7 @@ class Files {
       const rows = await Promise.all(entries.map(async entry => {
         const filename = path.join(absolute, entry.name);
         let info; try { info = await fs.stat(filename); } catch { info = { size: 0 }; }
-        return { name: entry.name, path: filename, directory: entry.isDirectory(), size: info.size, link: entry.isSymbolicLink() };
+        return { name: entry.name, path: filename, directory: entry.isDirectory(), size: info.size, modified: info.mtimeMs, link: entry.isSymbolicLink() };
       }));
       return { path: absolute, parent: path.dirname(absolute), rows };
     }

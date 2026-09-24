@@ -261,14 +261,9 @@ async function openSession(profile) {
         button('⌨ Ctrl+Alt+Del', () => item.rfb.sendCtrlAltDel()),
         button('📋 Colar texto', sendClipboard),
         button('↗ TightVNC Viewer (janela separada)', async () => { const r = await call('vnc:openViewer', profile); toast(`Abrindo no TightVNC Viewer, em janela própria (${r.viewer}). A senha é pedida por ele.`); }),
-        // O protocolo VNC não transfere arquivos: abre o painel Arquivos pelo canal paralelo de rede do
-        // mesmo host (compartilhamento C$ no Windows, SSH no Linux — ver remotefiles.cjs).
+        // Arquivos pelo TightVNC (tightft.cjs); se o servidor não permitir, o painel oferece a rede do host (C$/SSH).
         (item.viewButton = button('', () => setView(item.vncView === 'fit' ? 'real' : 'fit'))),
-        button('📁 Arquivos', async () => {
-          activeId = item.id; $('file-panel').hidden = false; layout();
-          try { await setFileMode('tightvnc'); }
-          catch (error) { toast(error.message + ' Tentando pelo compartilhamento de rede (C$/SSH)…'); await setFileMode('network'); }
-        }),
+        button('📁 Arquivos', async () => { activeId = item.id; $('file-panel').hidden = false; layout(); await syncFiles(true); }),
         fullscreenButton(item.pane)
       );
       item.pane.append(bar); setView(item.vncView);
@@ -455,7 +450,7 @@ async function closeSession(id, force = false) {
   const item = sessions.get(id); if (!item) return;
   if (!force && !item.ended && !await form({ title: 'Encerrar sessão?', message: item.name, fields: [], accept: 'Encerrar' })) return;
   await call(item.graphical ? 'graphics:close' : 'terminal:close', id);
-  clearInterval(item.clipboardTimer); item.rfb?.disconnect(); try { item.rdpSession?.shutdown(); } catch { /* já encerrada */ } item.terminal?.dispose(); item.pane.remove(); sessions.delete(id);
+  clearInterval(item.clipboardTimer); if (item.tightId) call('files:tightClose', item.tightId).catch(() => {}); item.rfb?.disconnect(); try { item.rdpSession?.shutdown(); } catch { /* já encerrada */ } item.terminal?.dispose(); item.pane.remove(); sessions.delete(id);
   if (activeId === id) activeId = [...sessions.keys()].at(-1);
   layout(); scheduleSaveOpen();
 }
@@ -493,7 +488,17 @@ function layout() {
   $('panes').classList.toggle('split', split && sessions.size > 1); $('panes').classList.toggle('many', split && selected.length > 2);
   for (const item of sessions.values()) item.pane.hidden = !selected.includes(item.id);
   requestAnimationFrame(() => { for (const item of sessions.values()) if (!item.pane.hidden) item.fit?.fit(); updateNativeBounds(); });
+  syncFiles(); updateToolbarMore();
 }
+// Barra da aba: com o painel de arquivos aberto ou janela estreita, o que não cabe vai para o menu ⋯.
+const toolbarMore = button('⋯', () => {
+  const actions = document.querySelector('.toolbar-actions'), edge = actions.getBoundingClientRect().right, box = toolbarMore.getBoundingClientRect();
+  const hidden = [...actions.querySelectorAll('button')].filter(el => el.offsetParent && el.getBoundingClientRect().right > edge + 1);
+  tree?.openMenu(box.left, box.bottom + 4, hidden.map(el => ({ label: el.textContent.trim() || el.title, action: () => el.click() })));
+});
+toolbarMore.id = 'toolbar-more'; toolbarMore.title = 'Mais ações'; toolbarMore.hidden = true; document.querySelector('.workspace-toolbar').append(toolbarMore);
+function updateToolbarMore() { requestAnimationFrame(() => { const actions = document.querySelector('.toolbar-actions'); toolbarMore.hidden = actions.scrollWidth <= actions.clientWidth + 1; }); }
+new ResizeObserver(updateToolbarMore).observe(document.querySelector('.toolbar-actions'));
 function updateNativeBounds() {
   const modal = !!document.querySelector('dialog[open]');
   for (const item of sessions.values()) if (['x11', 'xdmcp'].includes(item.profile.type)) {
@@ -517,32 +522,97 @@ api.on('graphics:state', ({ id, type, message }) => {
 });
 new ResizeObserver(layout).observe($('workspace'));
 
+// ---------- Painel de arquivos: segue a sessão da aba ativa ----------
+// VNC → TightVNC, SSH → SFTP, RDP → rede do host (C$/SSH); demais abas → este computador.
+const SESSION_FILES = { vnc: 'tightvnc', ssh: 'sftp', 'ssh-x11': 'sftp', rdp: 'network' };
+const FILE_KINDS = { local: 'LOCAL', sftp: 'SFTP', ftp: 'FTP', tightvnc: 'TIGHTVNC', network: 'REDE', none: '—' };
+const cleanError = message => String(message).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+function fileSize(bytes) { return bytes >= 1073741824 ? `${(bytes / 1073741824).toFixed(1)} GB` : bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : bytes >= 1024 ? `${Math.ceil(bytes / 1024)} KB` : `${bytes} B`; }
+function fileIcon(entry) {
+  if (entry.directory) return '📁';
+  const ext = (entry.name.match(/\.([^.]+)$/)?.[1] || '').toLowerCase();
+  const groups = [['🖼️', 'png jpg jpeg gif bmp svg webp ico'], ['⚙️', 'exe msi bat cmd ps1 sh com dll'], ['📦', 'zip rar 7z tar gz tgz bz2 xz iso'], ['📝', 'txt log md ini cfg conf json xml yml yaml csv'], ['📕', 'pdf'], ['📊', 'xls xlsx ods'], ['📃', 'doc docx odt rtf'], ['🎵', 'mp3 wav flac ogg'], ['🎬', 'mp4 mkv avi mov']];
+  return groups.find(([, list]) => list.split(' ').includes(ext))?.[0] || '📄';
+}
+function fileOrigin(kind = fileState.network ? 'network' : fileState.kind, item = sessions.get(fileState.source)) {
+  $('file-origin-name').textContent = kind === 'ftp' ? fileState.ftpHost || 'Servidor FTP' : kind === 'local' ? 'Este computador' : item?.name || 'Sessão encerrada';
+  $('file-origin-kind').textContent = FILE_KINDS[kind] || kind.toUpperCase();
+  for (const mode of ['local', 'sftp', 'ftp', 'network', 'tightvnc']) $('files-' + mode).classList.toggle('selected', mode === kind);
+}
+function fileMessage(text, actions = [], error = false) {
+  const box = elem('div', '', 'file-empty' + (error ? ' error' : '')); box.append(elem('div', text));
+  if (actions.length) { const bar = elem('div', '', 'file-empty-actions'); for (const [label, action] of actions) bar.append(button(label, action)); box.append(bar); }
+  $('file-list').replaceChildren(box);
+}
+function renderCrumbs(folder) {
+  const inner = elem('span', ''); $('file-crumbs').replaceChildren(inner); $('file-crumbs').hidden = false; $('file-path').hidden = true;
+  const parts = [];
+  if (fileState.kind === 'local') {
+    const unc = folder.match(/^(\\\\[^\\]+\\[^\\]+)(.*)$/), root = unc ? unc[1] : folder.match(/^[A-Za-z]:/)?.[0];
+    if (!root) parts.push([folder, folder]);
+    else {
+      let at = root + '\\'; parts.push([unc ? `${root.split('\\')[3]} (${root.split('\\')[2]})` : root, at]);
+      for (const part of (unc ? unc[2] : folder.slice(root.length)).split('\\').filter(Boolean)) { at = at.replace(/\\$/, '') + '\\' + part; parts.push([part, at]); }
+    }
+  } else { let at = ''; parts.push(['/', '/']); for (const part of folder.split('/').filter(Boolean)) { at += '/' + part; parts.push([part, at]); } }
+  parts.forEach(([label, target], index) => {
+    if (index) inner.append(elem('span', '›', 'sep'));
+    const crumb = button(label, event => { event.stopPropagation(); return loadFiles(target); }); crumb.title = target; inner.append(crumb);
+  });
+  // Caminho longo: mostra o fim (a pasta atual), como o Explorer.
+  requestAnimationFrame(() => { $('file-crumbs').scrollLeft = $('file-crumbs').scrollWidth; });
+}
+function editPath() { $('file-crumbs').hidden = true; $('file-path').hidden = false; $('file-path').value = fileState.path; $('file-path').focus(); $('file-path').select(); }
+function fileAction(label, title, action) { const el = button(label, action, 'file-act'); el.title = title; el.setAttribute('aria-label', title); return el; }
+function fileRow(entry) {
+  const row = elem('div', '', 'file-row'); row.dataset.name = entry.name.toLowerCase();
+  const open = button('', () => entry.directory ? loadFiles(entry.path) : selectFile(row), 'file-open'); open.title = entry.directory ? entry.name : `${entry.name}\nDuplo clique: ${fileState.kind === 'tightvnc' ? 'baixar' : 'abrir no editor'}`;
+  const meta = [entry.directory ? 'Pasta' : fileSize(entry.size || 0)];
+  if (entry.modified > 0) meta.push(new Date(entry.modified).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }));
+  const label = elem('span', '', 'file-text'); label.append(elem('span', entry.name, 'file-name'), elem('span', meta.join(' · '), 'file-meta'));
+  open.append(elem('span', fileIcon(entry), 'file-icon'), label); row.append(open);
+  if (!entry.directory) {
+    open.ondblclick = safe(() => openFile(entry));
+    open.onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); safe(() => openFile(entry))(); } };
+  }
+  if (fileState.kind !== 'local' || fileState.network) row.append(fileAction('↓', entry.directory ? 'Baixar pasta' : 'Baixar', () => entry.directory ? extras.downloadFolder(entry) : downloadFile(entry)));
+  if (fileState.kind !== 'ftp') row.append(fileAction('✎', 'Renomear', () => renameFile(entry)), fileAction('🗑', 'Excluir', () => deleteFile(entry)));
+  return row;
+}
+function selectFile(row) { for (const other of $('file-list').querySelectorAll('.file-row.selected')) other.classList.remove('selected'); row.classList.add('selected'); }
+function filterFiles() { const query = $('file-filter').value.trim().toLowerCase(); for (const row of $('file-list').querySelectorAll('.file-row')) row.hidden = !!query && !row.dataset.name.includes(query); }
+async function downloadFile(entry) { if (await call('transfer:pick', fileState.kind, fileState.id, 'download', entry.path)) toast('Download na fila — o progresso aparece no painel.'); }
+function openFile(entry) { return fileState.kind === 'tightvnc' ? downloadFile(entry) : editFile(entry); }
+
+// Devolve o erro (ou null) em vez de lançar: a lista mostra a mensagem com as saídas possíveis.
 async function loadFiles(directory = fileState.path) {
+  if (fileState.kind === 'none') { await syncFiles(true); return null; }
   $('file-status').textContent = 'Carregando…';
   try {
     const result = await call('files:list', fileState.kind, fileState.id, directory);
-    fileState.path = result.path; fileState.parent = result.parent; $('file-path').value = result.path; $('file-list').replaceChildren();
-    result.rows.sort((a, b) => Number(b.directory) - Number(a.directory) || a.name.localeCompare(b.name));
-    for (const entry of result.rows) {
-      const row = elem('div', '', 'file-row'); const open = button(`${entry.directory ? '▸' : '·'} ${entry.name}`, () => entry.directory ? loadFiles(entry.path) : editFile(entry), 'file-open'); open.title = entry.name; row.append(open);
-      if (entry.directory && !['local', 'tightvnc'].includes(fileState.kind)) row.append(button('↓', () => extras.downloadFolder(entry)));
-      if (!entry.directory) { row.append(elem('small', entry.size > 1048576 ? `${(entry.size / 1048576).toFixed(1)} M` : `${Math.ceil(entry.size / 1024)} K`)); if (fileState.kind !== 'local') row.append(button('↓', async () => { toast('Baixando arquivo…'); const result = await call('files:transfer', fileState.kind, fileState.id, 'download', entry.path); if (result) toast(`Salvo: ${result}`); })); }
-      if (fileState.kind !== 'ftp') row.append(button('⋯', () => fileActions(entry)));
-      $('file-list').append(row);
-    }
-    $('file-status').textContent = `${result.rows.length} itens · ${fileState.kind.toUpperCase()}`;
-  } catch (error) { $('file-status').textContent = error.message; throw error; }
+    if (result.path !== fileState.path) $('file-filter').value = '';
+    fileState.path = result.path; fileState.parent = result.parent; $('file-path').value = result.path; renderCrumbs(result.path); fileOrigin();
+    const item = sessions.get(fileState.source); if (item) item.filePlace = { kind: fileState.kind, network: fileState.network, path: result.path };
+    result.rows.sort((a, b) => Number(b.directory) - Number(a.directory) || a.name.localeCompare(b.name, 'pt-BR', { numeric: true }));
+    $('file-list').replaceChildren(...result.rows.map(fileRow));
+    if (!result.rows.length) fileMessage(fileState.kind === 'local' && !fileState.network ? 'Pasta vazia.' : 'Pasta vazia.\nArraste arquivos do Explorer para cá para enviar.');
+    filterFiles();
+    $('file-status').textContent = `${result.rows.length} itens · ${fileState.network ? 'REDE' : fileState.kind.toUpperCase()}`;
+    return null;
+  } catch (error) {
+    $('file-status').textContent = 'Não foi possível listar a pasta.';
+    fileMessage(cleanError(error.message), [['Tentar de novo', () => loadFiles(directory)], ...(directory !== fileState.path ? [['Voltar', () => loadFiles(fileState.path)]] : [])], true);
+    return error;
+  }
 }
-async function fileActions(entry) {
-  const result = await form({ title: entry.name, fields: [{ name: 'action', label: 'Ação', options: [{ value: 'rename', label: 'Renomear' }, { value: 'delete', label: 'Excluir arquivo ou pasta vazia' }] }] });
-  if (!result) return;
-  let destination;
-  if (result.action === 'rename') {
-    const answer = await form({ title: 'Renomear', fields: [{ name: 'name', label: 'Novo nome', value: entry.name, required: true, wide: true }] });
-    if (!answer) return; if (/[\\/]/.test(answer.name) || ['.', '..'].includes(answer.name)) throw new Error('Informe apenas o nome, sem pastas.');
-    destination = joinFilePath(answer.name);
-  } else if (!await form({ title: 'Excluir permanentemente?', message: entry.path, fields: [], accept: 'Excluir' })) return;
-  await call('files:change', fileState.kind, fileState.id, result.action, entry.path, destination); await loadFiles();
+async function renameFile(entry) {
+  const answer = await form({ title: 'Renomear', fields: [{ name: 'name', label: 'Novo nome', value: entry.name, required: true, wide: true }] });
+  if (!answer) return; if (/[\\/]/.test(answer.name) || ['.', '..'].includes(answer.name)) throw new Error('Informe apenas o nome, sem pastas.');
+  await call('files:change', fileState.kind, fileState.id, 'rename', entry.path, joinFilePath(answer.name)); await loadFiles();
+}
+async function deleteFile(entry) {
+  if (!await form({ title: `Excluir ${entry.directory ? 'a pasta (vazia)' : 'o arquivo'} permanentemente?`, message: entry.path, fields: [], accept: 'Excluir' })) return;
+  await call('files:change', fileState.kind, fileState.id, 'delete', entry.path); await loadFiles();
 }
 function joinFilePath(name) { return fileState.path.replace(/[\\/]$/, '') + (fileState.kind === 'local' ? '\\' : '/') + name; }
 async function editFile(entry) {
@@ -557,39 +627,80 @@ $('editor-save').onclick = safe(async () => {
 });
 async function closeEditor() { if (editor && $('editor-text').value !== editor.original && !await form({ title: 'Descartar alterações?', fields: [], accept: 'Descartar' })) return; $('editor-dialog').close(); editor = null; updateNativeBounds(); }
 $('editor-close').onclick = safe(closeEditor); $('editor-dialog').addEventListener('cancel', event => { event.preventDefault(); safe(closeEditor)(); });
-async function setFileMode(kind) {
-  fileState.network = false;
+// Abre a origem pedida. A conexão (TightVNC, rede) fica guardada na sessão para trocar de aba sem reconectar,
+// e cada sessão lembra a última pasta aberta.
+async function setFileMode(kind, item = current(), retried = false) {
+  $('file-modes').hidden = true; $('file-origin').setAttribute('aria-expanded', 'false');
+  let next;
   if (kind === 'tightvnc') {
-    const item = current();
     if (item?.profile.type !== 'vnc' || item.ended) throw new Error('Selecione uma sessão VNC ativa.');
-    toast('Abrindo os arquivos pelo TightVNC…');
-    const result = await call('files:tightvnc', { host: item.profile.host, port: item.profile.port, password: item.vncPassword || '' });
-    fileState.id = result.id; fileState.path = result.path; fileState.kind = 'tightvnc'; extras?.fileMode('sftp');
-    for (const type of ['local', 'sftp', 'ftp', 'network']) $('files-' + type).classList.remove('selected');
-    $('files-upload').hidden = false; $('files-mkdir').hidden = false; await loadFiles(); return;
-  }
-  if (kind === 'network') {
-    const item = current();
+    if (!item.tightId) { $('file-status').textContent = 'Conectando ao TightVNC…'; item.tightId = (await call('files:tightvnc', { host: item.profile.host, port: item.profile.port, password: item.vncPassword || '' })).id; }
+    next = { kind, id: item.tightId, path: '/', network: false, source: item.id };
+  } else if (kind === 'network') {
     if (!['vnc', 'rdp'].includes(item?.profile.type) || item.ended) throw new Error('Selecione uma sessão VNC ou RDP ativa.');
-    toast('Conectando à rede do host…');
-    const result = await call('network:filesOpen', item.id);
-    fileState.network = true; fileState.id = result.id; fileState.path = result.path; kind = result.kind;
-  } else if (kind === 'sftp') { const item = current(); if (!['ssh', 'ssh-x11'].includes(item?.profile.type) || item.ended) throw new Error('Selecione uma aba SSH ativa.'); fileState.id = item.id; fileState.path = '.'; }
-  else if (kind === 'ftp') {
+    if (!item.networkFiles) { $('file-status').textContent = 'Conectando à rede do host…'; item.networkFiles = await call('network:filesOpen', item.id); }
+    next = { kind: item.networkFiles.kind, id: item.networkFiles.id, path: item.networkFiles.path, network: true, source: item.id };
+  } else if (kind === 'sftp') {
+    if (!['ssh', 'ssh-x11'].includes(item?.profile.type) || item.ended) throw new Error('Selecione uma aba SSH ativa.');
+    next = { kind, id: item.id, path: '.', network: false, source: item.id };
+  } else if (kind === 'ftp') {
     const options = await form({ title: 'FTP / FTPS', fields: [{ name: 'host', label: 'Servidor', required: true }, { name: 'port', label: 'Porta', type: 'number', value: 21 }, { name: 'username', label: 'Usuário', value: 'anonymous' }, { name: 'secure', label: 'Usar TLS (FTPS explícito)', type: 'checkbox', value: true }] });
-    if (!options) return; fileState.id = await call('files:ftp', options); fileState.path = '/';
-  } else fileState.path = state.home;
-  fileState.kind = kind; extras?.fileMode(kind);
-  for (const type of ['local', 'sftp', 'ftp']) $('files-' + type).classList.toggle('selected', !fileState.network && kind === type);
-  $('files-network').classList.toggle('selected', fileState.network);
-  $('files-upload').hidden = kind === 'local' && !fileState.network; $('files-mkdir').hidden = kind === 'ftp'; await loadFiles();
+    if (!options) return; next = { kind, id: await call('files:ftp', options), path: '/', network: false, source: '', ftpHost: options.host };
+  } else next = { kind: 'local', id: '', path: state.home, network: false, source: '' };
+  const place = sessions.get(next.source)?.filePlace; if (place?.kind === next.kind && place.network === next.network) next.path = place.path;
+  Object.assign(fileState, { ftpHost: '' }, next);
+  extras?.fileMode(fileState.kind);
+  $('files-upload').hidden = fileState.kind === 'local' && !fileState.network; $('files-mkdir').hidden = fileState.kind === 'ftp'; fileOrigin();
+  const error = await loadFiles();
+  // Conexão guardada que caiu (servidor reiniciado, rede): reconecta uma vez.
+  if (error && !retried && item && /encerrad|ECONNRESET|desconectad/i.test(error.message) && ['tightvnc', 'network'].includes(kind)) {
+    if (kind === 'tightvnc') { call('files:tightClose', item.tightId).catch(() => {}); item.tightId = null; } else item.networkFiles = null;
+    return setFileMode(kind, item, true);
+  }
 }
-$('toggle-files').onclick = safe(async () => { $('file-panel').hidden = !$('file-panel').hidden; layout(); if (!$('file-panel').hidden) await loadFiles(fileState.path || state.home); });
+function fileSourceError(error, kind, item) {
+  Object.assign(fileState, { kind: 'none', id: '', network: false, source: item?.id || '' });
+  fileOrigin(kind, item); extras?.fileMode('local'); $('files-upload').hidden = $('files-mkdir').hidden = true;
+  $('file-crumbs').replaceChildren(); $('file-status').textContent = 'Sem acesso aos arquivos desta sessão.';
+  const actions = [['Tentar de novo', () => syncFiles(true)]];
+  if (kind === 'tightvnc') actions.push(['Usar a rede (C$/SSH)', () => setFileMode('network', item).catch(e => fileSourceError(e, 'network', item))]);
+  actions.push(['Arquivos locais', () => setFileMode('local')]);
+  fileMessage(cleanError(error.message), actions, true);
+}
+// Chamada a cada troca de aba (layout) e ao abrir o painel: só age quando a origem muda.
+async function syncFiles(force = false) {
+  if ($('file-panel').hidden) return;
+  const item = current(), live = item && !item.ended && SESSION_FILES[item.profile.type] ? item : null;
+  const key = live?.id || 'local';
+  if (!force && fileState.origin === key) return;
+  fileState.origin = key;
+  const kind = live ? SESSION_FILES[live.profile.type] : 'local';
+  // A rede do host pode perguntar o sistema/credenciais: só conecta quando a pessoa pede.
+  if (kind === 'network' && !live.networkFiles) {
+    Object.assign(fileState, { kind: 'none', id: '', network: false, source: live.id });
+    fileOrigin('network', live); extras?.fileMode('local'); $('files-upload').hidden = $('files-mkdir').hidden = true;
+    $('file-crumbs').replaceChildren(); $('file-status').textContent = 'Rede do host não conectada.';
+    fileMessage('Os arquivos desta sessão vêm pela rede do host\n(compartilhamento C$ no Windows, SSH no Linux).', [['Conectar', () => setFileMode('network', live).catch(error => fileSourceError(error, 'network', live))], ['Arquivos locais', () => setFileMode('local')]]);
+    return;
+  }
+  try { await setFileMode(kind, live || undefined); }
+  catch (error) { if (fileState.origin === key) fileSourceError(error, kind, live); }
+}
+$('toggle-files').onclick = safe(async () => { $('file-panel').hidden = !$('file-panel').hidden; layout(); if (!$('file-panel').hidden) await syncFiles(true); });
 $('close-files').onclick = () => { $('file-panel').hidden = true; layout(); };
-for (const kind of ['local', 'sftp', 'ftp', 'network']) $('files-' + kind).onclick = safe(() => setFileMode(kind));
+$('file-origin').onclick = () => { const open = $('file-modes').hidden; $('file-modes').hidden = !open; $('file-origin').setAttribute('aria-expanded', String(open)); };
+$('files-session').onclick = safe(() => syncFiles(true));
+for (const kind of ['local', 'sftp', 'ftp', 'network', 'tightvnc']) $('files-' + kind).onclick = safe(() => setFileMode(kind).catch(error => fileSourceError(error, kind, current())));
 $('files-up').onclick = safe(() => loadFiles(fileState.parent)); $('files-refresh').onclick = safe(() => loadFiles());
-$('file-path').onkeydown = event => { if (event.key === 'Enter') safe(() => loadFiles(event.target.value))(); };
-$('files-upload').onclick = safe(async () => { toast('Preparando envio…'); const result = await call('files:transfer', fileState.kind, fileState.id, 'upload', fileState.path); if (result) { toast('Transferência concluída.'); await loadFiles(); } });
+$('file-crumbs').onclick = editPath;
+$('file-path').onkeydown = event => {
+  if (event.key === 'Enter') { event.preventDefault(); safe(() => loadFiles(event.target.value))(); }
+  if (event.key === 'Escape') { event.preventDefault(); renderCrumbs(fileState.path); }
+};
+$('file-path').onblur = () => { if (!$('file-path').hidden) renderCrumbs(fileState.path); };
+$('file-filter').oninput = filterFiles;
+$('file-filter').onkeydown = event => { if (event.key === 'Escape') { event.target.value = ''; filterFiles(); } };
+$('files-upload').onclick = safe(async () => { const count = await call('transfer:pick', fileState.kind, fileState.id, 'upload', fileState.path); if (count) toast(`${count} arquivo(s) na fila de envio.`); });
 $('files-mkdir').onclick = safe(async () => { const result = await form({ title: 'Nova pasta', fields: [{ name: 'name', label: 'Nome', required: true, wide: true }] }); if (!result) return; if (/[\\/]/.test(result.name) || ['.', '..'].includes(result.name)) throw new Error('Nome inválido.'); await call('files:change', fileState.kind, fileState.id, 'mkdir', joinFilePath(result.name)); await loadFiles(); });
 
 function renderSnippets() {

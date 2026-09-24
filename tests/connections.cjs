@@ -233,12 +233,30 @@ function sftpServer(sftp) {
     await page.locator('.graphic-toolbar button', { hasText: 'Ajustar à janela' }).click({ force: true });
     await page.waitForFunction(() => Math.round(document.querySelector('.graphic-mount canvas').getBoundingClientRect().width) > 64);
     console.log('PASS: VNC alterna entre ajustar à janela e tamanho real (100%).');
-    // Botão Arquivos da barra VNC: abre o painel e inicia o canal de arquivos do host (pergunta o sistema).
+    // Botão Arquivos da barra VNC: o painel segue a sessão (origem VNC, modo TightVNC). Este servidor de
+    // laboratório não é TightVNC, então a lista mostra o erro e oferece a rede do host (pergunta o sistema).
     await page.locator('.graphic-toolbar button', { hasText: 'Arquivos' }).click({ force: true });
-    await page.locator('#dialog-title', { hasText: 'Sistema do host' }).waitFor({ timeout: 5000 });
     assert.equal(await page.locator('#file-panel').isHidden(), false, 'o painel Arquivos deveria abrir');
+    await page.locator('#file-list .file-empty.error').waitFor({ timeout: 10000 });
+    assert.equal(await page.locator('#file-origin-kind').textContent(), 'TIGHTVNC', 'a origem deveria ser o TightVNC da sessão ativa');
+    assert.notEqual(await page.locator('#file-origin-name').textContent(), 'Este computador', 'a origem deveria ser a sessão VNC, não o computador local');
+    await page.locator('#file-list button', { hasText: 'Usar a rede' }).click();
+    await page.locator('#dialog-title', { hasText: 'Sistema do host' }).waitFor({ timeout: 5000 });
     await page.click('#dialog-cancel');
-    console.log('PASS: botão Arquivos da barra VNC abre o painel e o canal de arquivos do host.');
+    console.log('PASS: Arquivos segue a sessão VNC ativa (TightVNC) e oferece a rede do host quando o TightVNC recusa.');
+    // Com o painel aberto, abrir uma aba SSH troca a origem sozinho para o SFTP dessa sessão.
+    await page.click('#new-session'); await page.locator('[name=name]').fill('SSH arquivos'); await page.locator('[name=type]').selectOption('ssh'); await page.locator('[name=host]').fill('127.0.0.1'); await page.locator('[name=username]').fill('tester');
+    await page.locator('#dialog-advanced summary').click(); await page.locator('[name=port]').fill(String(sshPort)); await page.click('#dialog-ok');
+    await page.locator('.tree-row.session .tree-main').filter({ hasText: 'SSH arquivos' }).click();
+    await page.locator('#form-dialog [name=password]').fill('lab-only'); await page.click('#dialog-ok');
+    const trust = page.getByRole('button', { name: 'Confiar nesta chave' }); if (await trust.isVisible({ timeout: 1500 }).catch(() => false)) await trust.click();
+    await page.locator('#file-list .file-row', { hasText: 'hello.txt' }).waitFor({ timeout: 15000 });
+    assert.equal(await page.locator('#file-origin-kind').textContent(), 'SFTP');
+    assert.equal(await page.locator('#file-origin-name').textContent(), 'SSH arquivos');
+    assert.ok(await page.locator('#file-crumbs button', { hasText: '/' }).count(), 'caminho em migalhas clicáveis');
+    await page.locator('.tab', { hasText: 'VNC' }).first().click();
+    await page.waitForFunction(() => document.querySelector('#file-origin-kind').textContent === 'TIGHTVNC', null, { timeout: 10000 });
+    console.log('PASS: trocar de aba troca a origem dos arquivos (SSH → SFTP, VNC → TightVNC) com caminho em migalhas.');
     // RDP agora roda em WASM (canvas) no renderer, conectado via um proxy WebSocket local (rdpproxy.cjs)
     // que este processo principal sobe sob demanda — sem controle ActiveX nem janela nativa nenhuma.
     // O handshake TLS completo já é validado à parte em tests/rdpproxy-handshake.test.cjs (com um

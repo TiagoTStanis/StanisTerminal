@@ -38,10 +38,10 @@
       </div>
     </main>
     <aside id="file-panel" hidden>
-      <div class="section-title">Arquivos <button id="close-files">✕</button></div>
-      <div class="file-modes"><button id="files-local" class="selected">Local</button><button id="files-sftp">SFTP</button><button id="files-ftp">FTP/S</button><button id="files-network">Rede</button></div>
-      <div class="file-path"><button id="files-up" title="Pasta superior">↑</button><input id="file-path" aria-label="Caminho dos arquivos"><button id="files-refresh" title="Atualizar">↻</button></div>
-      <div class="file-actions"><button id="files-upload">Enviar</button><button id="files-mkdir">Nova pasta</button></div>
+      <div class="file-head"><button id="file-origin" title="Trocar a origem dos arquivos" aria-expanded="false"><span class="file-origin-label">Arquivos de</span><strong id="file-origin-name">Este computador</strong><span id="file-origin-kind" class="file-kind">LOCAL</span><span aria-hidden="true">▾</span></button><button id="close-files" title="Fechar">✕</button></div>
+      <div class="file-modes" id="file-modes" hidden><button id="files-session" title="Seguir a aba ativa">Sessão ativa</button><button id="files-tightvnc">TightVNC</button><button id="files-sftp">SFTP</button><button id="files-network">Rede</button><button id="files-ftp">FTP/S</button><button id="files-local" class="selected">Local</button></div>
+      <div class="file-path"><button id="files-up" title="Pasta superior">↑</button><div id="file-crumbs" title="Clique no espaço vazio para digitar o caminho"></div><input id="file-path" aria-label="Caminho dos arquivos" hidden><button id="files-refresh" title="Atualizar">↻</button></div>
+      <div class="file-actions"><button id="files-upload" title="Enviar arquivos (ou arraste do Explorer para a lista)">↑ Enviar</button><button id="files-mkdir" title="Nova pasta">+ Pasta</button><input id="file-filter" type="search" placeholder="Filtrar…" aria-label="Filtrar arquivos"></div>
       <div id="file-list"></div><div id="file-status">Selecione uma pasta.</div>
     </aside>
   </div>

@@ -7,12 +7,14 @@ const MAX_ITEMS = 20000;
 // Fila de transferências: uma por vez, com cancelamento e progresso. Arquivos e pastas inteiras, SFTP e FTP.
 class Transfers {
   constructor(files, emit) { this.files = files; this.emit = emit; this.jobs = new Map(); this.running = false; }
-  list() { return [...this.jobs.values()].map(({ id, name, direction, status, done, total, error }) => ({ id, name, direction, status, done, total, error })); }
+  list() { return [...this.jobs.values()].map(({ id, name, direction, status, done, total, bytes, size, error }) => ({ id, name, direction, status, done, total, bytes, size, error })); }
+  // Progresso em bytes (TightVNC), avisando a interface no máximo 4 vezes por segundo.
+  progress(job, bytes) { job.bytes = bytes; const now = Date.now(); if (now - (job.pushed || 0) > 250) { job.pushed = now; this.push(); } }
   push() { this.emit('transfer:state', this.list()); }
-  add({ kind, id, direction, local, remote }) {
-    if (!['sftp', 'ftp', 'local'].includes(kind)) throw new Error('Transferência disponível para SFTP, FTP e Rede.');
+  add({ kind, id, direction, local, remote, size }) {
+    if (!['sftp', 'ftp', 'local', 'tightvnc'].includes(kind)) throw new Error('Transferência disponível para SFTP, FTP, TightVNC e Rede.');
     if (!['upload', 'download'].includes(direction)) throw new Error('Direção inválida.');
-    const job = { id: randomUUID(), kind, session: id, direction, local, remote, name: path.basename(direction === 'upload' ? local : remote) || remote, status: 'na fila', done: 0, total: 0, cancelled: false };
+    const job = { id: randomUUID(), kind, session: id, direction, local, remote, name: path.basename(direction === 'upload' ? local : remote) || remote, status: 'na fila', done: 0, total: 0, size: Number(size) || 0, cancelled: false };
     this.jobs.set(job.id, job); this.push(); this.next(); return job.id;
   }
   cancel(id) { const job = this.jobs.get(id); if (job) { job.cancelled = true; if (job.status === 'na fila') { job.status = 'cancelada'; } this.push(); } }
@@ -35,6 +37,7 @@ class Transfers {
       const [from, to] = job.direction === 'upload' ? [job.local, job.remote] : [job.remote, job.local];
       await fs.cp(from, to, { recursive: true }); job.done = job.total = 1; return;
     }
+    if (job.kind === 'tightvnc') return this.runTight(job, stat);
     if (job.kind === 'sftp') {
       const sftp = await this.files.remote(job.session);
       if (job.direction === 'upload') return stat.isDirectory() ? this.uploadTree(job, sftp) : this.tick(job, await this.putOne(job, sftp, job.local, job.remote));
@@ -45,6 +48,46 @@ class Transfers {
     if (job.direction === 'upload') { if (stat.isDirectory()) await ftp.uploadFromDir(job.local, job.remote); else await ftp.uploadFrom(job.local, job.remote); }
     else { const isDir = (await ftp.list(path.posix.dirname(job.remote))).some(x => x.name === path.posix.basename(job.remote) && x.isDirectory); if (isDir) await fs.mkdir(job.local, { recursive: true }), await ftp.downloadToDir(job.local, job.remote); else await ftp.downloadTo(job.local, job.remote); }
     job.done = job.total = 1;
+  }
+  // TightVNC: arquivos com progresso em bytes; pastas percorridas pela listagem do próprio TightVNC.
+  async runTight(job, stat) {
+    const ft = this.files.tightClient(job.session);
+    const options = () => ({ progress: bytes => this.progress(job, bytes), stop: () => job.cancelled });
+    const one = async (local, remote, size) => {
+      job.size = size; job.bytes = 0;
+      if (job.direction === 'upload') await ft.upload(local, remote, true, options());
+      else { await fs.mkdir(path.dirname(local), { recursive: true }); await ft.download(remote, local, options()); }
+      job.done += 1; job.total = Math.max(job.total, job.done); this.push();
+    };
+    if (job.direction === 'upload') {
+      if (!stat.isDirectory()) return one(job.local, job.remote, stat.size);
+      const items = []; const walk = async (dir, remote) => {
+        for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
+          if (entry.isSymbolicLink()) continue; if (items.length > MAX_ITEMS) throw new Error(`Pasta com mais de ${MAX_ITEMS} itens.`);
+          const local = path.join(dir, entry.name), target = path.posix.join(remote, entry.name);
+          if (entry.isDirectory()) { items.push({ dir: true, remote: target }); await walk(local, target); }
+          else items.push({ local, remote: target, size: (await fs.stat(local)).size });
+        }
+      };
+      await walk(job.local, job.remote); job.total = items.filter(x => !x.dir).length;
+      await ft.mkdir(job.remote).catch(() => {});
+      for (const item of items) { if (job.cancelled) throw new Error('Cancelada.'); if (item.dir) await ft.mkdir(item.remote).catch(() => {}); else await one(item.local, item.remote, item.size); }
+      return;
+    }
+    const parent = path.posix.dirname(job.remote), name = path.posix.basename(job.remote);
+    const entry = (await ft.list(parent)).find(x => x.name === name);
+    if (!entry) throw new Error('Arquivo remoto não encontrado.');
+    if (!entry.directory) return one(job.local, job.remote, entry.size);
+    const items = []; const walk = async (remote, local) => {
+      for (const x of await ft.list(remote)) {
+        if (/[\\/]/.test(x.name) || ['.', '..'].includes(x.name)) continue; // nome remoto malicioso não escapa da pasta
+        if (items.length > MAX_ITEMS) throw new Error(`Pasta com mais de ${MAX_ITEMS} itens.`);
+        const child = path.posix.join(remote, x.name), target = path.join(local, x.name);
+        if (x.directory) { items.push({ dir: true, local: target }); await walk(child, target); } else items.push({ remote: child, local: target, size: x.size });
+      }
+    };
+    await walk(job.remote, job.local); job.total = items.filter(x => !x.dir).length; await fs.mkdir(job.local, { recursive: true });
+    for (const item of items) { if (job.cancelled) throw new Error('Cancelada.'); if (item.dir) await fs.mkdir(item.local, { recursive: true }); else await one(item.local, item.remote, item.size); }
   }
   tick(job, bytes) { job.done += 1; job.total = Math.max(job.total, job.done); void bytes; this.push(); }
   async putOne(job, sftp, local, remote) {

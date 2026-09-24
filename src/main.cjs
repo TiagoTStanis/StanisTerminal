@@ -249,6 +249,7 @@ function register() {
   handle('files:change', (kind, id, action, filename, destination) => files.change(kind, id, action, text(filename, 4096), destination ? text(destination, 4096) : undefined));
   handle('files:ftp', options => files.ftpConnect(options));
   handle('files:tightvnc', options => files.tightConnect(options));
+  handle('files:tightClose', id => files.tightClose(String(id)));
   // ZMODEM sobre um canal SSH dedicado (client.exec de rz/sz), independente do terminal interativo.
   const sshClientOf = id => { const item = terminals.get(id); if (!item.client || item.ended) throw new Error('Selecione uma sessão SSH ativa.'); return item.client; };
   handle('zmodem:upload', async id => {
@@ -279,6 +280,17 @@ function register() {
   handle('transfer:add', options => {
     if (!options || typeof options.local !== 'string' || typeof options.remote !== 'string') throw new Error('Transferência inválida.');
     return transfers.add({ kind: options.kind, id: options.id, direction: options.direction, local: text(options.local, 4096), remote: text(options.remote, 4096) });
+  });
+  // Envio (vários arquivos) ou download de um arquivo pela fila, com progresso no painel.
+  handle('transfer:pick', async (kind, id, direction, remote) => {
+    remote = text(remote, 4096); const join = kind === 'local' ? path.join : path.posix.join;
+    if (direction === 'upload') {
+      const result = await dialog.showOpenDialog(window, { properties: ['openFile', 'multiSelections'], title: 'Arquivos a enviar' }); if (result.canceled) return 0;
+      const chosen = result.filePaths.slice(0, 200); for (const local of chosen) transfers.add({ kind, id, direction, local, remote: join(remote, path.basename(local)) });
+      return chosen.length;
+    }
+    const result = await dialog.showSaveDialog(window, { defaultPath: path.win32.basename(remote) }); if (result.canceled) return 0;
+    transfers.add({ kind, id, direction: 'download', local: result.filePath, remote }); return 1;
   });
   handle('transfer:folder', async (kind, id, direction, remote) => {
     const result = direction === 'upload' ? await dialog.showOpenDialog(window, { properties: ['openDirectory'] }) : await dialog.showOpenDialog(window, { properties: ['openDirectory', 'createDirectory'], title: 'Escolha a pasta de destino' });

@@ -141,17 +141,21 @@ class TightFT {
       return rows;
     });
   }
-  download(remote, local) {
+  // progress(bytes) é chamado a cada pedaço; stop() devolve true para cancelar.
+  download(remote, local, { progress = () => {}, stop = () => false } = {}) {
     return this.run(async () => {
       this.write(u32(FT.DOWNLOAD_START_REQUEST), utf8(remote), u64(0));
       await this.reply(FT.DOWNLOAD_START_REPLY);
       const out = fs.createWriteStream(local); // o diálogo de salvar já confirmou a substituição
       try {
+        let done = 0;
         for (;;) {
+          if (stop()) throw new Error('Cancelada.');
           this.write(u32(FT.DOWNLOAD_DATA_REQUEST), Buffer.from([0]), u32(CHUNK));
           const first = await this.peekEnd();
           if (first === 'end') break;
           const data = await this.block(); if (!out.write(data)) await new Promise(r => out.once('drain', r));
+          done += data.length; progress(done);
         }
       } finally { await new Promise(r => out.end(r)); }
     });
@@ -170,7 +174,7 @@ class TightFT {
       throw new Error(`Resposta inesperada do TightVNC (0x${id.toString(16)}).`);
     }
   }
-  upload(local, remote, overwrite = false) {
+  upload(local, remote, overwrite = false, { progress = () => {}, stop = () => false } = {}) {
     return this.run(async () => {
       const info = await fs.promises.stat(local);
       this.write(u32(FT.UPLOAD_START_REQUEST), utf8(remote), Buffer.from([overwrite ? 1 : 0]), u64(0));
@@ -179,9 +183,10 @@ class TightFT {
       try {
         const chunk = Buffer.alloc(CHUNK);
         for (let offset = 0; offset < info.size;) {
+          if (stop()) throw new Error('Cancelada.');
           const { bytesRead } = await handle.read(chunk, 0, CHUNK, offset); if (!bytesRead) break;
           this.write(u32(FT.UPLOAD_DATA_REQUEST), Buffer.from([0]), u32(bytesRead), u32(bytesRead), chunk.subarray(0, bytesRead));
-          await this.reply(FT.UPLOAD_DATA_REPLY); offset += bytesRead;
+          await this.reply(FT.UPLOAD_DATA_REPLY); offset += bytesRead; progress(offset);
         }
       } finally { await handle.close(); }
       const flags = Buffer.alloc(2); this.write(u32(FT.UPLOAD_END_REQUEST), flags, u64(Math.round(info.mtimeMs)));
