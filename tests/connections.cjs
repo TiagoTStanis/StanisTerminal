@@ -210,6 +210,22 @@ function sftpServer(sftp) {
     assert.ok(cutAt >= 0 && vAt > cutAt, `Ctrl+V deveria mandar o texto e depois o "v". Recebido: ${JSON.stringify(vncEvents)}`);
     assert.equal(vncEvents.filter(e => e === 'key:76:1').length, 1, `o "v" deveria ir uma vez só. Recebido: ${JSON.stringify(vncEvents)}`);
     console.log('PASS: Ctrl+V na tela VNC manda o texto copiado no Windows antes das teclas de colar.');
+    // Ctrl+V e Enter logo em seguida (o uso normal): a ordem no servidor tem de ser texto, Ctrl, V, Enter,
+    // e o Ctrl só é solto depois do V — antes o Enter podia passar na frente da colagem.
+    for (let round = 0; round < 5; round++) {
+      vncEvents.length = 0; const text = `Rodada ${round} colar e enter`;
+      await app.evaluate(({ clipboard }, t) => clipboard.writeText(t), text);
+      await page.keyboard.down('Control'); await page.keyboard.press('KeyV'); await page.keyboard.up('Control'); await page.keyboard.press('Enter'); await page.keyboard.type('ls');
+      await new Promise(resolve => setTimeout(resolve, 700));
+      const order = ['cut:' + text, 'key:ffe3:1', 'key:76:1', 'key:76:0', 'key:ffe3:0', 'key:ff0d:1', 'key:6c:1'].map(e => vncEvents.indexOf(e));
+      assert.ok(order.every((at, i) => at >= 0 && (i === 0 || at > order[i - 1])), `ordem errada na rodada ${round}: ${JSON.stringify(vncEvents)}`);
+    }
+    // Shift+Insert também cola (manda o texto e o Insert com o Shift apertado).
+    vncEvents.length = 0; await app.evaluate(({ clipboard }) => clipboard.writeText('Via Shift Insert'));
+    await page.keyboard.press('Shift+Insert'); await new Promise(resolve => setTimeout(resolve, 600));
+    const shiftAt = vncEvents.indexOf('cut:Via Shift Insert'), insAt = vncEvents.indexOf('key:ff63:1');
+    assert.ok(shiftAt >= 0 && insAt > shiftAt && vncEvents.includes('key:ffe1:1'), `Shift+Insert: ${JSON.stringify(vncEvents)}`);
+    console.log('PASS: VNC mantém a ordem com Ctrl+V seguido de Enter e digitação, e Shift+Insert cola.');
     // Clipboard do VNC clássico é Latin-1: pontuação tipográfica vira o equivalente simples (não "?").
     vncEvents.length = 0;
     await app.evaluate(({ clipboard }) => clipboard.writeText('a—b “c” d… ação'));

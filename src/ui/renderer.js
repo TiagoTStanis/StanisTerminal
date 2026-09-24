@@ -167,7 +167,10 @@ async function openSession(profile) {
     terminal.attachCustomKeyEventHandler(event => {
       if (event.type !== 'keydown') return true;
       const ctrl = event.ctrlKey && !event.altKey && !event.metaKey;
-      if ((ctrl && event.code === 'KeyV') || (event.shiftKey && !event.ctrlKey && !event.altKey && event.code === 'Insert')) { event.preventDefault(); pasteClipboard(); return false; }
+      // Colar pelo teclado segue o caminho nativo (evento paste, tratado abaixo), como o terminal do VS Code:
+      // o texto entra na ordem das teclas. Ler o clipboard pelo processo principal era assíncrono e um Enter
+      // digitado logo depois chegava ao shell antes do texto colado.
+      if ((ctrl && event.code === 'KeyV') || (event.shiftKey && !event.ctrlKey && !event.altKey && event.code === 'Insert')) return false;
       if (ctrl && event.shiftKey && event.code === 'KeyC') { event.preventDefault(); copySelection(); return false; }
       if ((ctrl && !event.shiftKey && event.code === 'KeyC' && terminal.hasSelection()) || (ctrl && !event.shiftKey && event.code === 'Insert')) { event.preventDefault(); copySelection(); return false; }
       if (extras.key(item, event)) return false;
@@ -235,27 +238,50 @@ async function openSession(profile) {
       };
       const sendClipboard = () => safe(() => syncClipboard(true))();
       item.clipboardTimer = setInterval(() => { if (activeId === item.id && document.hasFocus()) safe(syncClipboard)(); }, 1000);
-      // Ctrl+V: garante que o texto copiado agora há pouco chegue ao servidor ANTES das teclas de colar
-      // (a sincronização periódica pode ainda não ter rodado). Segura o V, sincroniza e só então envia.
-      let heldV = false, ctrlDown = false;
-      window.addEventListener('blur', () => { heldV = false; ctrlDown = false; });
-      item.mount.addEventListener('keyup', event => { if (event.key === 'Control') ctrlDown = false; }, true);
-      item.mount.addEventListener('keydown', event => {
-        if (event.key === 'Control') ctrlDown = true;
-        if (event.ctrlKey && event.shiftKey && event.code === 'KeyV') { event.preventDefault(); sendClipboard(); return; }
-        if (event.ctrlKey && !event.shiftKey && !event.altKey && event.code === 'KeyV') {
-          event.preventDefault(); event.stopImmediatePropagation(); if (event.repeat) return; heldV = true;
-          safe(async () => {
-            await syncClipboard(); await new Promise(r => setTimeout(r, 120));
-            // Se o Ctrl foi solto durante a espera, o servidor já recebeu o "Ctrl solto": manda o Ctrl de novo.
-            const wrap = !ctrlDown; if (wrap) item.rfb?.sendKey(0xffe3, 'ControlLeft', true);
-            item.rfb?.sendKey(0x76, 'KeyV', true); item.rfb?.sendKey(0x76, 'KeyV', false);
-            if (wrap) item.rfb?.sendKey(0xffe3, 'ControlLeft', false);
-          })();
+      // Ctrl+V / Shift+Insert: usa o colar nativo do Chromium (o evento paste chega na ordem das teclas e já
+      // traz o texto), manda o texto ao servidor e só então a tecla de colar. As teclas digitadas nesse meio
+      // (um Enter logo depois, por exemplo) esperam numa fila e seguem na ordem — antes, o Enter podia chegar
+      // ao servidor antes da colagem.
+      let pasting = null, waiting = null, pasteKey = null, replaying = false, serverCtrl = false, swallowV = false;
+      const queued = [];
+      const track = event => { if (event.key === 'Control') serverCtrl = event.type === 'keydown'; };
+      const replay = () => {
+        replaying = true;
+        try { for (const init of queued.splice(0)) { const event = new KeyboardEvent(init.type, init); item.mount.querySelector('canvas')?.dispatchEvent(event); track(event); } }
+        finally { replaying = false; }
+      };
+      const pasteText = text => {
+        clearTimeout(waiting); waiting = null; const key = pasteKey; pasteKey = null;
+        pasting = (async () => {
+          if (text && text !== lastText) { lastText = text; item.rfb?.clipboardPasteFrom(toLatin1(text)); await new Promise(r => setTimeout(r, 150)); }
+          if (key === 'Insert') { item.rfb?.sendKey(0xff63, 'Insert', true); item.rfb?.sendKey(0xff63, 'Insert', false); return; }
+          const wrap = !serverCtrl; if (wrap) item.rfb?.sendKey(0xffe3, 'ControlLeft', true);
+          item.rfb?.sendKey(0x76, 'KeyV', true); item.rfb?.sendKey(0x76, 'KeyV', false);
+          if (wrap) item.rfb?.sendKey(0xffe3, 'ControlLeft', false);
+        })().catch(error => toast(error.message)).finally(() => { pasting = null; replay(); });
+      };
+      const onKey = event => {
+        if (replaying) return;
+        // A tecla de colar já foi enviada por pasteText: o keyup dela não vai para o servidor.
+        if (event.type === 'keyup' && event.code === 'KeyV' && swallowV) { swallowV = false; event.preventDefault(); event.stopImmediatePropagation(); return; }
+        if (pasting || waiting) {
+          event.preventDefault(); event.stopImmediatePropagation();
+          queued.push({ type: event.type, key: event.key, code: event.code, location: event.location, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey, altKey: event.altKey, metaKey: event.metaKey, repeat: event.repeat, bubbles: true, cancelable: true });
+          return;
         }
-      }, true);
-      item.mount.addEventListener('keyup', event => { if (heldV && event.code === 'KeyV') { heldV = false; event.preventDefault(); event.stopImmediatePropagation(); } }, true);
-      item.mount.addEventListener('paste', event => { event.preventDefault(); safe(() => item.rfb.clipboardPasteFrom(event.clipboardData.getData('text/plain')))(); }, true);
+        if (event.type === 'keydown' && event.ctrlKey && event.shiftKey && event.code === 'KeyV') { event.preventDefault(); event.stopImmediatePropagation(); sendClipboard(); return; }
+        const isPaste = event.type === 'keydown' && ((event.ctrlKey && !event.shiftKey && !event.altKey && event.code === 'KeyV') || (event.shiftKey && !event.ctrlKey && !event.altKey && event.code === 'Insert'));
+        if (!isPaste) { track(event); return; }
+        // Sem preventDefault: o navegador dispara o paste logo em seguida. O noVNC não vê esta tecla.
+        event.stopImmediatePropagation(); if (event.repeat) { event.preventDefault(); return; }
+        pasteKey = event.code === 'Insert' ? 'Insert' : 'KeyV'; swallowV = pasteKey === 'KeyV';
+        // Se o paste nativo não vier (clipboard sem texto, foco fora da tela), lê pelo processo principal.
+        waiting = setTimeout(() => { safe(async () => pasteText(await call('clipboard:read').catch(() => '')))(); }, 150);
+      };
+      window.addEventListener('blur', () => { serverCtrl = false; });
+      item.mount.addEventListener('keydown', onKey, true);
+      item.mount.addEventListener('keyup', onKey, true);
+      item.mount.addEventListener('paste', event => { event.preventDefault(); event.stopImmediatePropagation(); pasteText(event.clipboardData.getData('text/plain')); }, true);
       const bar = elem('div', '', 'graphic-toolbar');
       bar.append(
         button('⌨ Ctrl+Alt+Del', () => item.rfb.sendCtrlAltDel()),
@@ -326,16 +352,20 @@ async function openRdp(item, result) {
   new ResizeObserver(fit).observe(item.mount);
   builder.canvasResizedCallback(() => fit());
   builder.extension(new rdp.Extension('enable_credssp', true));
+  // rdpSent: último texto que o servidor já conhece (enviado daqui ou copiado lá), para não reanunciar à toa.
+  let rdpSent = null;
   builder.remoteClipboardChangedCallback(clipboardData => safe(() => {
     if (clipboardData.isEmpty()) return;
-    for (const entry of clipboardData.items()) if (entry.mimeType() === 'text/plain') call('clipboard:write', entry.value());
+    for (const entry of clipboardData.items()) if (entry.mimeType() === 'text/plain') { rdpSent = entry.value(); call('clipboard:write', entry.value()); }
   })());
-  const sendClipboard = () => safe(async () => {
-    if (!item.rdpSession) return;
-    const text = await call('clipboard:read'); if (!text) return;
+  // Devolve true quando anunciou um texto novo ao servidor.
+  const syncRdpClipboard = async (force = false) => {
+    if (!item.rdpSession) return false;
+    const text = await call('clipboard:read'); if (!text || (!force && text === rdpSent)) return false;
     const data = new rdp.ClipboardData(); data.addText('text/plain', text);
-    await item.rdpSession.onClipboardPaste(data);
-  })();
+    await item.rdpSession.onClipboardPaste(data); rdpSent = text; return true;
+  };
+  const sendClipboard = () => safe(() => syncRdpClipboard(true))();
   builder.forceClipboardUpdateCallback(sendClipboard);
   // Transferência de arquivo pelo canal CLIPRDR: enviar = arrasta/escolhe arquivo local, o servidor
   // "puxa" o conteúdo em pedaços; receber = copiar um arquivo no Explorer remoto habilita o botão
@@ -408,8 +438,20 @@ async function openRdp(item, result) {
   const size = item.rdpSession.desktopSize(); canvas.width = size.width; canvas.height = size.height; fit();
   canvas.focus(); toast('RDP conectado.');
   const runInput = (build) => { if (!item.rdpSession) return; const tx = new rdp.InputTransaction(); build(tx); safe(() => item.rdpSession.applyInputs(tx))(); };
-  canvas.addEventListener('keydown', event => { event.preventDefault(); const code = scancode(event); if (code === undefined) return; runInput(tx => tx.addEvent(rdp.DeviceEvent.keyPressed(code))); });
-  canvas.addEventListener('keyup', event => { event.preventDefault(); const code = scancode(event); if (code === undefined) return; runInput(tx => tx.addEvent(rdp.DeviceEvent.keyReleased(code))); });
+  const sendKey = (event, down) => { const code = scancode(event); if (code === undefined) return; runInput(tx => tx.addEvent(down ? rdp.DeviceEvent.keyPressed(code) : rdp.DeviceEvent.keyReleased(code))); };
+  // Ctrl+V / Shift+Insert: anuncia primeiro o texto copiado no Windows e só então manda a tecla; as teclas
+  // digitadas nesse meio esperam na fila e seguem na ordem (senão o servidor colava o clipboard antigo).
+  let rdpPasting = null; const rdpQueue = [];
+  canvas.addEventListener('keydown', event => {
+    event.preventDefault();
+    if (rdpPasting) { rdpQueue.push([event, true]); return; }
+    const isPaste = !event.repeat && ((event.ctrlKey && !event.shiftKey && !event.altKey && event.code === 'KeyV') || (event.shiftKey && !event.ctrlKey && !event.altKey && event.code === 'Insert'));
+    if (!isPaste) { sendKey(event, true); return; }
+    rdpPasting = syncRdpClipboard().then(changed => changed && new Promise(r => setTimeout(r, 100))).catch(() => {})
+      .then(() => { sendKey(event, true); for (const [queued, down] of rdpQueue.splice(0)) sendKey(queued, down); })
+      .finally(() => { rdpPasting = null; });
+  });
+  canvas.addEventListener('keyup', event => { event.preventDefault(); if (rdpPasting) { rdpQueue.push([event, false]); return; } sendKey(event, false); });
   canvas.addEventListener('mousemove', event => {
     const rect = canvas.getBoundingClientRect();
     const clamp = (v, max) => Math.min(Math.max(v, 0), max - 1);
@@ -425,7 +467,7 @@ async function openRdp(item, result) {
   }, { passive: false });
   canvas.addEventListener('contextmenu', event => event.preventDefault());
   canvas.addEventListener('paste', event => { event.preventDefault(); sendClipboard(); });
-  canvas.addEventListener('focus', sendClipboard);
+  canvas.addEventListener('focus', () => safe(syncRdpClipboard)());
   const bar = elem('div', '', 'graphic-toolbar');
   bar.append(
     button('⌨ Ctrl+Alt+Del', () => runInput(tx => {
@@ -442,6 +484,9 @@ async function openRdp(item, result) {
   }).catch(error => { item.ended = true; toast('RDP: ' + rdpErrorText(error)); renderTabs(); });
 }
 async function paste(item, text) {
+  // Uma linha só com a quebra no fim (linha inteira copiada do terminal, Notepad++, Teams): cola sem a quebra
+  // e sem perguntar, como o trimPaste do Windows Terminal.
+  if (/^[^\r\n]*\r?\n$/.test(text || '')) text = text.replace(/\r?\n$/, '');
   if (!text) return;
   if (/[\r\n]/.test(text) && !await form({ title: 'Colar várias linhas?', message: 'A colagem pode executar comandos. Confira o conteúdo antes de continuar.', fields: [{ name: 'preview', label: 'Conteúdo', type: 'textarea', value: text, wide: true }], accept: 'Colar conteúdo' }).then(answer => { if (!answer) return false; text = answer.preview; return true; })) return;
   item.terminal.paste(text);

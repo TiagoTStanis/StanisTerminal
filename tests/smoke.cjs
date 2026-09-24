@@ -20,6 +20,14 @@ const assert = require('node:assert/strict');
     await page.locator('.xterm-helper-textarea').pressSequentially("Write-Output ('STANIS_' + 'PTY_OK')", { delay: 20 });
     await page.keyboard.press('Enter');
     await page.waitForFunction(() => document.querySelector('.xterm-rows')?.textContent.includes('STANIS_PTY_OK'));
+    // Ctrl+V seguido de Enter na hora: o texto colado tem de chegar ao shell antes do Enter (antes, às vezes
+    // o Enter passava na frente). Linha com quebra no fim cola sem perguntar.
+    for (let round = 0; round < 10; round++) {
+      await app.evaluate(({ clipboard }, n) => clipboard.writeText(`Write-Output ('COLA_' + '${n}')` + (n % 2 ? '\r\n' : '')), round);
+      await page.keyboard.press('Control+V'); await page.keyboard.press('Enter');
+      await page.waitForFunction(n => document.querySelector('.xterm-rows')?.textContent.includes(`COLA_${n}`) && !document.querySelector('dialog[open]'), round, { timeout: 5000 });
+    }
+    console.log('PASS: Ctrl+V + Enter no terminal cola na ordem (10/10) e sem perguntar para uma linha só.');
     await page.click('#add-tab'); await page.waitForFunction(() => document.querySelectorAll('.tab').length === 2);
     await page.click('#split'); await page.waitForSelector('#panes.split');
     assert.equal(await page.locator('.pane:visible').count(), 2);
