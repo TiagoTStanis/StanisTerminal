@@ -1,4 +1,5 @@
 const fs = require('node:fs/promises');
+const { TightFT } = require('./tightft.cjs');
 const path = require('node:path');
 const { Client } = require('basic-ftp');
 const { randomUUID } = require('node:crypto');
@@ -6,7 +7,13 @@ const { sftpCall } = require('./ssh.cjs');
 const { host, port } = require('./config.cjs');
 
 class Files {
-  constructor(sessions, ask) { this.sessions = sessions; this.ask = ask; this.ftp = new Map(); }
+  constructor(sessions, ask) { this.sessions = sessions; this.ask = ask; this.ftp = new Map(); this.tight = new Map(); }
+  // Arquivos pela extensão do TightVNC (conexão própria, compartilhada, sem imagem de tela).
+  async tightConnect(options) {
+    const ft = await TightFT.connect({ host: host(options.host), port: port(options.port, 5900), password: typeof options.password === 'string' ? options.password : '' });
+    const id = randomUUID(); this.tight.set(id, ft); return { id, path: '/' };
+  }
+  tightClient(id) { const ft = this.tight.get(id); if (!ft) throw new Error('Conexão de arquivos do TightVNC encerrada. Abra de novo pelo botão Arquivos.'); return ft; }
   async remote(id) {
     const item = this.sessions.get(id);
     if (!item.client || item.ended) throw new Error('Abra uma sessão SSH ativa para acessar SFTP.');
@@ -22,6 +29,12 @@ class Files {
     const id = randomUUID(); this.ftp.set(id, client); return id;
   }
   async list(kind, id, directory) {
+    if (kind === 'tightvnc') {
+      // Caminhos no formato do TightVNC: "/" lista os discos, "/C:/pasta" é uma pasta.
+      const folder = !directory || directory === '/' ? '/' : '/' + directory.replace(/^\/+|\/+$/g, '');
+      const rows = await this.tightClient(id).list(folder);
+      return { path: folder, parent: folder === '/' ? '/' : path.posix.dirname(folder), rows: rows.map(x => ({ name: x.name, path: path.posix.join(folder, x.name), directory: x.directory, size: x.size })) };
+    }
     if (kind === 'local') {
       const absolute = path.resolve(directory);
       const entries = await fs.readdir(absolute, { withFileTypes: true });
@@ -43,6 +56,7 @@ class Files {
     return { path: real, parent: path.posix.dirname(real), rows: (await ftp.list()).map(x => ({ name: x.name, path: path.posix.join(real, x.name), directory: x.isDirectory, size: x.size })) };
   }
   async read(kind, id, filename) {
+    if (kind === 'tightvnc') throw new Error('Para editar um arquivo pelo TightVNC, baixe-o primeiro (↓).');
     if (kind === 'ftp') throw new Error('Para editar um arquivo FTP, baixe-o primeiro.');
     const stat = kind === 'local' ? await fs.stat(filename) : await sftpCall(await this.remote(id), 'stat', filename);
     if (stat.size > 2 * 1024 * 1024) throw new Error('Editor limitado a arquivos de texto de 2 MiB.');
@@ -57,12 +71,20 @@ class Files {
     else throw new Error('Editor não disponível para FTP.');
   }
   async transfer(kind, id, direction, local, remote) {
+    if (kind === 'tightvnc') return direction === 'upload' ? this.tightClient(id).upload(local, remote, true) : this.tightClient(id).download(remote, local);
     if (kind === 'local') return direction === 'upload' ? fs.copyFile(local, remote) : fs.copyFile(remote, local);
     if (kind === 'sftp') return sftpCall(await this.remote(id), direction === 'upload' ? 'fastPut' : 'fastGet', direction === 'upload' ? local : remote, direction === 'upload' ? remote : local);
     const ftp = this.ftp.get(id); if (!ftp) throw new Error('FTP desconectado.');
     if (direction === 'upload') await ftp.uploadFrom(local, remote); else await ftp.downloadTo(local, remote);
   }
   async change(kind, id, action, filename, destination) {
+    if (kind === 'tightvnc') {
+      const ft = this.tightClient(id);
+      if (action === 'mkdir') return ft.mkdir(filename);
+      if (action === 'rename') return ft.rename(filename, destination);
+      if (action === 'delete') return ft.remove(filename);
+      throw new Error('Operação de arquivos inválida.');
+    }
     if (kind === 'local') {
       if (action === 'mkdir') return fs.mkdir(filename);
       if (action === 'rename') {
@@ -83,6 +105,6 @@ class Files {
     } else throw new Error('Use upload/download para FTP nesta versão.');
     throw new Error('Operação de arquivos inválida.');
   }
-  closeAll() { for (const ftp of this.ftp.values()) ftp.close(); this.ftp.clear(); }
+  closeAll() { for (const ftp of this.ftp.values()) ftp.close(); this.ftp.clear(); for (const ft of this.tight.values()) ft.close(); this.tight.clear(); }
 }
 module.exports = { Files };

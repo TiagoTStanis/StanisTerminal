@@ -200,7 +200,7 @@ async function openSession(profile) {
       setView(savedView);
       item.rfb.addEventListener('credentialsrequired', safe(async () => {
         const credentials = await form({ title: 'Autenticação VNC', fields: [{ name: 'username', label: 'Usuário (quando exigido)' }, { name: 'password', label: 'Senha', type: 'password' }] });
-        if (credentials) item.rfb.sendCredentials(credentials); else await closeSession(item.id, true);
+        if (credentials) { item.vncPassword = credentials.password || ''; item.rfb.sendCredentials(credentials); } else await closeSession(item.id, true);
       }));
       item.rfb.addEventListener('connect', () => toast('VNC conectado.'));
       item.rfb.addEventListener('disconnect', event => {
@@ -264,7 +264,11 @@ async function openSession(profile) {
         // O protocolo VNC não transfere arquivos: abre o painel Arquivos pelo canal paralelo de rede do
         // mesmo host (compartilhamento C$ no Windows, SSH no Linux — ver remotefiles.cjs).
         (item.viewButton = button('', () => setView(item.vncView === 'fit' ? 'real' : 'fit'))),
-        button('📁 Arquivos', async () => { activeId = item.id; $('file-panel').hidden = false; layout(); await setFileMode('network'); }),
+        button('📁 Arquivos', async () => {
+          activeId = item.id; $('file-panel').hidden = false; layout();
+          try { await setFileMode('tightvnc'); }
+          catch (error) { toast(error.message + ' Tentando pelo compartilhamento de rede (C$/SSH)…'); await setFileMode('network'); }
+        }),
         fullscreenButton(item.pane)
       );
       item.pane.append(bar); setView(item.vncView);
@@ -521,7 +525,7 @@ async function loadFiles(directory = fileState.path) {
     result.rows.sort((a, b) => Number(b.directory) - Number(a.directory) || a.name.localeCompare(b.name));
     for (const entry of result.rows) {
       const row = elem('div', '', 'file-row'); const open = button(`${entry.directory ? '▸' : '·'} ${entry.name}`, () => entry.directory ? loadFiles(entry.path) : editFile(entry), 'file-open'); open.title = entry.name; row.append(open);
-      if (entry.directory && fileState.kind !== 'local') row.append(button('↓', () => extras.downloadFolder(entry)));
+      if (entry.directory && !['local', 'tightvnc'].includes(fileState.kind)) row.append(button('↓', () => extras.downloadFolder(entry)));
       if (!entry.directory) { row.append(elem('small', entry.size > 1048576 ? `${(entry.size / 1048576).toFixed(1)} M` : `${Math.ceil(entry.size / 1024)} K`)); if (fileState.kind !== 'local') row.append(button('↓', async () => { toast('Baixando arquivo…'); const result = await call('files:transfer', fileState.kind, fileState.id, 'download', entry.path); if (result) toast(`Salvo: ${result}`); })); }
       if (fileState.kind !== 'ftp') row.append(button('⋯', () => fileActions(entry)));
       $('file-list').append(row);
@@ -555,6 +559,15 @@ async function closeEditor() { if (editor && $('editor-text').value !== editor.o
 $('editor-close').onclick = safe(closeEditor); $('editor-dialog').addEventListener('cancel', event => { event.preventDefault(); safe(closeEditor)(); });
 async function setFileMode(kind) {
   fileState.network = false;
+  if (kind === 'tightvnc') {
+    const item = current();
+    if (item?.profile.type !== 'vnc' || item.ended) throw new Error('Selecione uma sessão VNC ativa.');
+    toast('Abrindo os arquivos pelo TightVNC…');
+    const result = await call('files:tightvnc', { host: item.profile.host, port: item.profile.port, password: item.vncPassword || '' });
+    fileState.id = result.id; fileState.path = result.path; fileState.kind = 'tightvnc'; extras?.fileMode('sftp');
+    for (const type of ['local', 'sftp', 'ftp', 'network']) $('files-' + type).classList.remove('selected');
+    $('files-upload').hidden = false; $('files-mkdir').hidden = false; await loadFiles(); return;
+  }
   if (kind === 'network') {
     const item = current();
     if (!['vnc', 'rdp'].includes(item?.profile.type) || item.ended) throw new Error('Selecione uma sessão VNC ou RDP ativa.');

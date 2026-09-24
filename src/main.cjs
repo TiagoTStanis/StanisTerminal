@@ -248,6 +248,7 @@ function register() {
   handle('files:write', (kind, id, filename, content) => files.write(kind, id, text(filename, 4096), content));
   handle('files:change', (kind, id, action, filename, destination) => files.change(kind, id, action, text(filename, 4096), destination ? text(destination, 4096) : undefined));
   handle('files:ftp', options => files.ftpConnect(options));
+  handle('files:tightvnc', options => files.tightConnect(options));
   // ZMODEM sobre um canal SSH dedicado (client.exec de rz/sz), independente do terminal interativo.
   const sshClientOf = id => { const item = terminals.get(id); if (!item.client || item.ended) throw new Error('Selecione uma sessão SSH ativa.'); return item.client; };
   handle('zmodem:upload', async id => {
