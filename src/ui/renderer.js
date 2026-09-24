@@ -134,7 +134,7 @@ async function sessionForm(existing = {}) {
   state.secrets = await call('profile:secrets'); state.config.profiles = state.config.profiles.filter(p => p.id !== saved.id).concat(saved); renderProfiles(); toast('Sessão salva. Clique nela para conectar.');
 }
 let tree = null;
-function renderProfiles() { tree ??= setupTree({ $, call, form, toast, safe, elem, state: () => state, openSession, sessionForm, localProfile }); tree.render(); }
+function renderProfiles() { tree ??= setupTree({ $, api, call, form, toast, safe, elem, state: () => state, openSession, sessionForm, localProfile }); tree.render(); }
 let saveOpenTimer;
 function scheduleSaveOpen() { clearTimeout(saveOpenTimer); saveOpenTimer = setTimeout(() => call('session:saveOpen', [...sessions.values()].map(s => ({ profile: s.profile }))).catch(() => {}), 800); }
 async function openSession(profile) {

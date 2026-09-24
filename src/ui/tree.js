@@ -14,7 +14,7 @@ const BADGE = { local: '>_', ssh: 'SSH', 'ssh-x11': 'X11', rdp: 'RDP', vnc: 'VNC
 const ROOT = 'Minhas sessões';
 
 export function setupTree(ctx) {
-  const { $, call, form, toast, safe, elem, state, openSession, sessionForm, localProfile } = ctx;
+  const { $, api, call, form, toast, safe, elem, state, openSession, sessionForm, localProfile } = ctx;
   const collapsed = new Set(['@local']); // terminais locais começam recolhidos; o que você abrir ou fechar depois é lembrado
   try { const saved = localStorage.getItem('stanis.collapsed'); if (saved) { collapsed.clear(); for (const item of JSON.parse(saved)) collapsed.add(item); } } catch { /* sem armazenamento local: padrão */ }
   const persist = () => { try { localStorage.setItem('stanis.collapsed', JSON.stringify([...collapsed])); } catch { /* opcional */ } };
@@ -35,17 +35,24 @@ export function setupTree(ctx) {
     const byId = new Map(state().config.profiles.map(p => [p.id, p]));
     for (const row of $('sessions-list').querySelectorAll('.tree-row.session')) { const p = byId.get(row.dataset.id), badge = row.querySelector('.badge'); if (p && badge) paint(badge, p); }
   }
+  // Pinta só os selos cujo host acabou de responder (os resultados chegam em lotes durante a checagem).
+  api.on('network:reach', batch => {
+    for (const [key, online] of Object.entries(batch)) reach.set(key, online);
+    const byId = new Map(state().config.profiles.map(p => [p.id, p]));
+    for (const row of $('sessions-list').querySelectorAll('.tree-row.session')) { const p = byId.get(row.dataset.id), badge = row.querySelector('.badge'); if (p && badge && target(p) in batch) paint(badge, p); }
+  });
   async function checkOnline(force = false) {
     if (checking) return;
     if (state().config.settings.checkOnline === false) { if (reach.size) { reach.clear(); repaint(); } return; }
     if (!force && (!document.hasFocus() || Date.now() - lastCheck < 115000)) return;
-    const keys = [...new Set(state().config.profiles.map(target).filter(Boolean))];
+    // As sessões visíveis na lista vão primeiro; as de pastas fechadas ou fora da tela, depois.
+    const box = $('sessions-list').getBoundingClientRect(), byId = new Map(state().config.profiles.map(p => [p.id, p])), first = [];
+    for (const row of $('sessions-list').querySelectorAll('.tree-row.session')) { const r = row.getBoundingClientRect(), p = byId.get(row.dataset.id); if (p && r.bottom > box.top && r.top < box.bottom) first.push(target(p)); }
+    const keys = [...new Set([...first, ...state().config.profiles.map(target)].filter(Boolean))];
     if (!keys.length) return;
     checking = true; lastCheck = Date.now();
-    try {
-      const results = await call('network:reachable', keys.map(key => { const i = key.lastIndexOf(':'); return { host: key.slice(0, i), port: Number(key.slice(i + 1)) }; }));
-      keys.forEach((key, i) => reach.set(key, results[i])); repaint();
-    } catch { /* o status é só informativo */ } finally { checking = false; }
+    try { await call('network:reachable', keys.map(key => { const i = key.lastIndexOf(':'); return { host: key.slice(0, i), port: Number(key.slice(i + 1)) }; })); }
+    catch { /* o status é só informativo */ } finally { checking = false; }
   }
   setInterval(() => checkOnline(), 20000); setTimeout(() => checkOnline(true), 1500);
 

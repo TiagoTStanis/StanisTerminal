@@ -6,7 +6,7 @@ const os = require('node:os');
 const crypto = require('node:crypto');
 const { pathToFileURL } = require('node:url');
 const { Config, profile, groupPath, text, host: validHost, port: validPort, readJSON, writeJSON } = require('./config.cjs');
-const net = require('node:net');
+const { checkMany } = require('./reach.cjs');
 const { SSH } = require('./ssh.cjs');
 const { Sessions } = require('./sessions.cjs');
 const { Files } = require('./files.cjs');
@@ -385,17 +385,14 @@ function register() {
   });
   // Status online das sessões (como o mRemoteNG): só abre uma conexão TCP na porta da sessão e fecha,
   // sem enviar nada nem autenticar. Poucas por vez, para não parecer varredura a um IPS.
+  // Status online: os resultados chegam aos poucos (lotes a cada 200 ms) pelo evento network:reach.
   handle('network:reachable', async targets => {
-    if (!Array.isArray(targets) || targets.length > 500) throw new Error('Lista de hosts inválida.');
+    if (!Array.isArray(targets) || targets.length > 5000) throw new Error('Lista de hosts inválida.');
     const list = targets.map(t => ({ host: validHost(t?.host), port: validPort(t?.port) }));
-    const probe = ({ host, port }) => new Promise(resolve => {
-      const socket = net.connect({ host, port }); let settled = false;
-      const done = ok => { if (settled) return; settled = true; socket.destroy(); resolve(ok); };
-      socket.setTimeout(2500, () => done(false)); socket.once('connect', () => done(true)); socket.once('error', () => done(false));
-    });
-    const results = new Array(list.length); let next = 0;
-    await Promise.all(Array.from({ length: Math.min(8, list.length) }, async () => { while (next < list.length) { const i = next++; results[i] = await probe(list[i]); } }));
-    return results;
+    let batch = {}, timer = null;
+    const flush = () => { timer = null; if (Object.keys(batch).length) { emit('network:reach', batch); batch = {}; } };
+    const results = await checkMany(list, { onResult: (i, online) => { batch[`${list[i].host}:${list[i].port}`] = online; timer ??= setTimeout(flush, 200); } });
+    clearTimeout(timer); flush(); return results;
   });
   handle('network:portscan', options => network.portScan(options));
   handle('network:wol', options => network.wakeOnLan(options));
