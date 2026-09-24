@@ -260,7 +260,7 @@ async function openSession(profile) {
       bar.append(
         button('⌨ Ctrl+Alt+Del', () => item.rfb.sendCtrlAltDel()),
         button('📋 Colar texto', sendClipboard),
-        button('↗ TightVNC Viewer', async () => { const r = await call('vnc:openViewer', profile); toast(`Abrindo no TightVNC Viewer (${r.viewer}). A senha é pedida por ele.`); }),
+        button('↗ TightVNC Viewer (janela separada)', async () => { const r = await call('vnc:openViewer', profile); toast(`Abrindo no TightVNC Viewer, em janela própria (${r.viewer}). A senha é pedida por ele.`); }),
         // O protocolo VNC não transfere arquivos: abre o painel Arquivos pelo canal paralelo de rede do
         // mesmo host (compartilhamento C$ no Windows, SSH no Linux — ver remotefiles.cjs).
         (item.viewButton = button('', () => setView(item.vncView === 'fit' ? 'real' : 'fit'))),

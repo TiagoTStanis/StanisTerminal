@@ -89,7 +89,7 @@ export function setupTree(ctx) {
   const sessionActions = p => [
     { label: 'Conectar', action: () => openSession(p) },
     { label: 'Editar…', action: () => sessionForm(p) },
-    ...(p.type === 'vnc' ? [{ label: 'Abrir no TightVNC Viewer', action: async () => { const r = await call('vnc:openViewer', p); toast(`Abrindo no TightVNC Viewer (${r.viewer}). A senha é pedida por ele.`); } }] : []),
+    ...(p.type === 'vnc' ? [{ label: 'Abrir no TightVNC Viewer (janela separada)', action: async () => { const r = await call('vnc:openViewer', p); toast(`Abrindo no TightVNC Viewer (${r.viewer}). A senha é pedida por ele.`); } }] : []),
     { label: 'Duplicar', action: async () => { const { id, ...copy } = p; const saved = await call('profile:save', { ...copy, name: p.name + ' (cópia)' }); state().config.profiles.push(saved); await refresh(); } },
     { label: 'Mover para…', action: async () => {
       const answer = await form({ title: 'Mover sessão', fields: [{ name: 'group', label: 'Pasta', value: p.group, wide: true, options: allFolders().map(f => ({ value: f, label: f })) }, { name: 'created', label: 'Ou nova pasta (use / para subpastas)', wide: true }], accept: 'Mover' });

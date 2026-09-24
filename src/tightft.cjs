@@ -23,7 +23,14 @@ const FT = {
 const CHUNK = 64 * 1024;
 // O servidor devolve erros do Windows como "Error code N": traduz os mais comuns.
 const WIN_ERRORS = { 2: 'arquivo não encontrado', 3: 'pasta não encontrada', 5: 'acesso negado', 32: 'o arquivo está em uso por outro programa', 80: 'já existe um arquivo com esse nome', 145: 'a pasta não está vazia', 183: 'já existe um item com esse nome' };
-const explain = message => { const code = /Error code (\d+)/.exec(message)?.[1]; return 'TightVNC: ' + (WIN_ERRORS[code] || message); };
+// Mensagens de acesso do servidor (ft-server-lib/FileTransferSecurity.cpp): rodando como serviço, o TightVNC
+// só libera arquivos com um usuário logado, tela desbloqueada e a área de trabalho normal ativa.
+const SERVER_MESSAGES = {
+  'Access denied.': 'acesso negado pelo servidor. Quando roda como serviço, o TightVNC só libera arquivos com um usuário logado e a tela desbloqueada na máquina remota (não funciona na tela de login, na tela de bloqueio nem com uma janela do UAC aberta). Desbloqueie a sessão remota pela tela do VNC e tente de novo.',
+  'File transfers are disabled on server side.': 'a transferência de arquivos está desativada nas configurações deste servidor TightVNC.',
+  'File transfers is disabled': 'a transferência de arquivos está desativada nas configurações deste servidor TightVNC.',
+};
+const explain = message => { const code = /Error code (\d+)/.exec(message)?.[1]; return 'TightVNC: ' + (WIN_ERRORS[code] || SERVER_MESSAGES[message.trim()] || message); };
 
 // Resposta ao desafio da autenticação VNC: DES com a senha (8 bytes) de bits invertidos como chave.
 function vncResponse(password, challenge) {

@@ -38,6 +38,7 @@ function labServer({ password = 'lab123', fileTransfer = true } = {}) {
         if (id === FT.FILE_LIST_REQUEST) {
           await read(1); const folder = await str();
           const entries = [...new Set([...files.keys()].filter(f => path.posix.dirname(f) === folder).map(f => path.posix.basename(f)))];
+          if (folder === '/C:/bloqueado') { fail('Access denied.'); continue; } // sessão remota bloqueada/sem usuário
           if (!entries.length && folder !== '/C:/pasta') { fail('Error code 3'); continue; }
           const body = Buffer.concat([u32(entries.length), ...entries.map(e => { const n = Buffer.from(e); const meta = Buffer.alloc(18); meta.writeBigUInt64BE(BigInt(files.get(folder + '/' + e).length)); meta.writeUInt16BE(0, 16); return Buffer.concat([meta, u32(n.length), n]); })]);
           socket.write(Buffer.concat([u32(FT.FILE_LIST_REPLY), Buffer.from([0]), u32(body.length), u32(body.length), body]));
@@ -76,6 +77,7 @@ test('lista, envia (vários pedaços), baixa e traduz os erros do servidor', asy
     assert.equal(Buffer.compare(fs.readFileSync(back), bytes), 0, 'download volta idêntico');
     await assert.rejects(ft.download('/C:/pasta/nao-existe.txt', path.join(dir, 'x')), /arquivo não encontrado/);
     await assert.rejects(ft.list('/C:/outra'), /pasta não encontrada/);
+    await assert.rejects(ft.list('/C:/bloqueado'), /usuário logado e a tela desbloqueada/);
     ft.close();
   } finally { server.close(); fs.rmSync(dir, { recursive: true, force: true }); }
 });
