@@ -508,6 +508,13 @@ app.on('web-contents-created', (_, contents) => {
   // Links que abririam outra janela (target=_blank) abrem na própria aba; esquemas estranhos são barrados.
   contents.setWindowOpenHandler(({ url }) => { if (web(url)) contents.loadURL(url); return { action: 'deny' }; });
   contents.on('will-navigate', (event, url) => { if (!web(url)) event.preventDefault(); });
+  // Zoom da página (Ctrl + roda, Ctrl +/-/0): quem aplica é a aba, que guarda a escolha da sessão.
+  contents.on('zoom-changed', (_, direction) => emit('web:zoom', { id: contents.id, step: direction === 'in' ? 1 : -1 }));
+  contents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || !input.control || input.alt || input.meta) return;
+    const step = ['=', '+'].includes(input.key) ? 1 : input.key === '-' ? -1 : input.key === '0' ? 0 : null;
+    if (step !== null) { event.preventDefault(); emit('web:zoom', { id: contents.id, step }); }
+  });
 });
 app.whenReady().then(() => {
   const web = session.fromPartition(WEB_PARTITION);

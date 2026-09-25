@@ -165,13 +165,16 @@ function openWebSession(profile) {
   const bar = elem('div', '', 'graphic-toolbar web-toolbar');
   bar.append(
     button('←', () => item.webview.canGoBack() && item.webview.goBack()), button('→', () => item.webview.canGoForward() && item.webview.goForward()), button('↻', () => item.webview.reload()),
-    address, keepButton,
+    address, (item.zoomButton = button('', () => openWebZoomMenu(item))), keepButton,
     button('🌐 Navegador', () => call('links:openProfile', profile.id)),
     fullscreenButton(item.pane)
   );
   bar.children[0].title = 'Voltar'; bar.children[1].title = 'Avançar'; bar.children[2].title = 'Recarregar'; bar.children[5].title = 'Abrir no navegador padrão (fora do app)';
   item.pane.append(bar); setKeepAlive(profile.keepAlive !== false);
-  item.address = address; attachWebview(item, document, profile.url);
+  item.address = address;
+  try { const saved = localStorage.getItem('web-zoom:' + profile.id); item.webZoom = saved ? (/^(auto|w\d+)$/.test(saved) ? saved : Number(saved) || 'auto') : 'auto'; } catch { item.webZoom = 'auto'; }
+  attachWebview(item, document, profile.url); applyWebZoom(item);
+  new ResizeObserver(() => applyWebZoom(item)).observe(item.mount);
   toast(`Abrindo ${profile.name}…`); scheduleSaveOpen();
   return item;
 }
@@ -187,8 +190,49 @@ function attachWebview(item, doc, url) {
   view.addEventListener('did-navigate', showUrl); view.addEventListener('did-navigate-in-page', event => { if (event.isMainFrame) showUrl(event); });
   view.addEventListener('did-start-loading', () => { $('status').textContent = `${profile.name}: carregando…`; });
   view.addEventListener('did-stop-loading', () => { $('status').textContent = `${profile.name}: pronto.`; });
+  // O zoom só pode ser aplicado depois que a página existe; reaplica a cada navegação (o Chromium zera por site).
+  view.addEventListener('dom-ready', () => { item.webReady = true; applyWebZoom(item); });
+  view.addEventListener('did-navigate', () => applyWebZoom(item));
   view.addEventListener('did-fail-load', event => { if (event.isMainFrame && event.errorCode !== -3) toast(`${profile.name}: não foi possível abrir (${event.errorDescription || event.errorCode}).`); });
 }
+// ---------- Lupa da aba de Link ----------
+// "auto": se a aba for mais estreita que 1280 px, reduz a página para o site enxergar uma tela de computador de
+// 1280 px (muitos sites trocam para o layout de celular em janelas estreitas); "wNNNN": o site enxerga uma tela
+// de NNNN px de largura, reduzida para caber; número: zoom fixo.
+const WEB_ZOOMS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5];
+function webZoomFactor(item) {
+  const width = item.mount.clientWidth || 1200, mode = item.webZoom;
+  const factor = mode === 'auto' ? Math.min(1, width / 1280) : typeof mode === 'string' ? width / Number(mode.slice(1)) : Number(mode) || 1;
+  return Math.max(0.25, Math.min(3, factor));
+}
+function applyWebZoom(item) {
+  const mode = item.webZoom, factor = webZoomFactor(item);
+  const label = mode === 'auto' ? 'Auto' : typeof mode === 'string' ? `Tela ${mode.slice(1)}` : `${Math.round(mode * 100)}%`;
+  if (item.zoomButton) { item.zoomButton.textContent = `🔍 ${label}${typeof mode === 'number' ? '' : ` (${Math.round(factor * 100)}%)`}`; item.zoomButton.title = 'Tamanho da página: automático, largura de tela ou zoom (Ctrl + roda, Ctrl +/−/0)'; }
+  if (item.webview && item.webReady) try { item.webview.setZoomFactor(factor); } catch { /* página ainda carregando */ }
+}
+function setWebZoom(item, mode) {
+  if (typeof mode === 'number') mode = Math.round(Math.max(0.25, Math.min(3, mode)) * 100) / 100;
+  item.webZoom = mode; applyWebZoom(item);
+  try { localStorage.setItem('web-zoom:' + item.profile.id, String(mode)); } catch { /* preferência opcional */ }
+}
+function openWebZoomMenu(item) {
+  const box = item.zoomButton.getBoundingClientRect(), current = item.webZoom;
+  const option = (mode, label) => ({ label: (mode === current ? '✓ ' : '   ') + label, action: () => setWebZoom(item, mode) });
+  tree?.openMenu(box.left, box.bottom + 4, [
+    option('auto', 'Automático (layout de computador, mín. 1280 px)'), '-',
+    option('w1366', 'Como uma tela de 1366 px'), option('w1600', 'Como uma tela de 1600 px'), option('w1920', 'Como uma tela de 1920 px (Full HD)'), '-',
+    ...WEB_ZOOMS.map(z => option(z, z === 1 ? '100% (tamanho real)' : `${Math.round(z * 100)}%`)),
+  ]);
+}
+// Ctrl + roda / Ctrl +/−/0 dentro da página (repassados pelo processo principal).
+api.on('web:zoom', ({ id, step }) => {
+  const item = [...sessions.values()].find(s => { try { return s.webview?.getWebContentsId() === id; } catch { return false; } });
+  if (!item) return;
+  if (step === 0) return setWebZoom(item, 'auto');
+  setWebZoom(item, webZoomFactor(item) * (step > 0 ? 1.1 : 1 / 1.1));
+});
+
 async function keepAlive(item) {
   const view = item.webview; if (!view || item.ended || !item.keepAlive) return;
   // Movimento de mouse real (evento confiável) dentro da página, sem clicar em nada.

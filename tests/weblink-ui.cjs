@@ -12,6 +12,8 @@ const root = path.resolve(__dirname, '..');
 function labSite(IDLE_MS) {
   const sessions = new Map(), log = [];
   const handler = (req, res) => {
+    // /largura: a página mostra no título a largura que enxerga (innerWidth), para conferir a lupa.
+    if (req.url.startsWith('/largura')) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); return res.end('<title>W</title><script>const t = () => { document.title = "W" + innerWidth; }; addEventListener("resize", t); t();</script>'); }
     const sid = /sid=(\w+)/.exec(req.headers.cookie || '')?.[1];
     const alive = sid && sessions.has(sid) && Date.now() - sessions.get(sid) < IDLE_MS;
     log.push({ at: Date.now(), sid: alive ? sid : null, url: req.url });
@@ -60,6 +62,23 @@ function labSite(IDLE_MS) {
     assert.equal(await page.locator('#dialog-title', { hasText: 'Certificado' }).isVisible().catch(() => false), false, 'certificado já confiado não pergunta de novo');
     console.log('PASS: link HTTPS com certificado próprio abre numa aba; confiança lembrada e login (cookie) mantido ao reabrir.');
 
+    // Lupa: com a aba estreita, "Automático" faz o site enxergar 1280 px; "tela de 1920" e 100% também.
+    await page.setViewportSize({ width: 1150, height: 760 });
+    await newLink('Largura lab', `http://127.0.0.1:${plain.address().port}/largura`, 4);
+    const seen = async () => { await page.waitForTimeout(700); return Number((await webTitle()).slice(1)); };
+    await page.waitForFunction(() => /^W\d+/.test(document.querySelector('.pane:not([hidden]) webview')?.getTitle() || ''), null, { timeout: 15000 });
+    const paneWidth = await page.evaluate(() => document.querySelector('.pane:not([hidden]) .web-mount').clientWidth);
+    assert.ok(paneWidth < 1280, `aba estreita no teste (${paneWidth})`);
+    let width = await seen(); assert.ok(Math.abs(width - 1280) <= 4, `automático: o site enxerga ~1280 px (viu ${width})`);
+    const zoomTo = async label => { await page.locator('.pane:not([hidden]) .web-toolbar button', { hasText: '🔍' }).click(); await page.locator('.ctx-item', { hasText: label }).click(); };
+    await zoomTo('1920'); width = await seen(); assert.ok(Math.abs(width - 1920) <= 6, `tela de 1920: viu ${width}`);
+    await zoomTo('100% (tamanho real)'); width = await seen(); assert.ok(Math.abs(width - paneWidth) <= 4, `100%: viu ${width}, aba ${paneWidth}`);
+    // Ctrl − dentro da página diminui o zoom (o site passa a enxergar mais largura).
+    await page.evaluate(() => { const v = document.querySelector('.pane:not([hidden]) webview'); v.focus(); v.sendInputEvent({ type: 'keyDown', keyCode: '-', modifiers: ['control'] }); v.sendInputEvent({ type: 'keyUp', keyCode: '-', modifiers: ['control'] }); });
+    width = await seen(); assert.ok(width > paneWidth + 40, `Ctrl−: viu ${width}, aba ${paneWidth}`);
+    assert.match(await page.locator('.pane:not([hidden]) .web-toolbar button', { hasText: '🔍' }).textContent(), /91%|90%/);
+    console.log('PASS: lupa da aba de link: automático (1280 px), tela de 1920, 100% e Ctrl−.');
+
     // Manter ativa: sem nenhuma interação, o app renova o login e move o mouse na página a cada 1 minuto.
     await newLink('Switch lab', `http://127.0.0.1:${plain.address().port}/`, 1);
     await page.waitForFunction(() => /LOGIN|LOGADO/.test(document.querySelector('.pane:not([hidden]) webview')?.getTitle() || ''), null, { timeout: 15000 });
@@ -67,7 +86,7 @@ function labSite(IDLE_MS) {
     await page.waitForFunction(() => /movimentos=\d+/.test(document.querySelector('.pane:not([hidden]) webview')?.getTitle() || ''), null, { timeout: 80000, polling: 1000 });
     const renew = site.log.filter(entry => entry.at > firstAt + 30000 && entry.sid);
     assert.ok(renew.length >= 1, `o servidor recebeu a renovação com o login: ${JSON.stringify(site.log.slice(-3))}`);
-    assert.ok(await page.locator('.web-toolbar button', { hasText: 'Manter ativa: 1 min' }).count(), 'botão mostra o intervalo');
+    assert.ok(await page.locator('.pane:not([hidden]) .web-toolbar button', { hasText: 'Manter ativa: 1 min' }).count(), 'botão mostra o intervalo');
     console.log(`PASS: manter ativa renovou o login no servidor e gerou movimento real na página (${await webTitle()}).`);
     assert.deepEqual(errors, [], 'sem erros no renderer');
   } finally { await app?.close().catch(() => {}); plain.close(); tls.close(); }
