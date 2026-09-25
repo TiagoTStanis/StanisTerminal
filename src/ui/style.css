@@ -381,3 +381,10 @@ body.no-sessions .workspace-toolbar { display: none !important; }
 /* Status online da sessão: só o fundo do selo muda (verde = a porta responde, vermelho = não responde). */
 .badge.reach-on, :is(.t-dark, .t-dracula, .t-nord, .t-solarized, .t-monokai) .badge.reach-on { background: #1e8e3e; color: #fff; border-color: #1e8e3e; }
 .badge.reach-off, :is(.t-dark, .t-dracula, .t-nord, .t-solarized, .t-monokai) .badge.reach-off { background: #d93025; color: #fff; border-color: #d93025; }
+
+/* Sessão em janela separada: o painel ocupa a janela inteira. */
+body.popout-window { margin: 0; height: 100vh; overflow: hidden; background: var(--terminal); display: block; }
+.popout-host { position: fixed; inset: 0; display: grid; }
+.popout-host > .pane { display: block !important; min-height: 0; }
+.tab .tab-detach { opacity: .55; }
+.tab:hover .tab-detach, .tab.active .tab-detach { opacity: 1; }

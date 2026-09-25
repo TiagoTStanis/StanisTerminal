@@ -243,12 +243,21 @@ function sftpServer(sftp) {
     // quando a tela remota é maior, ex.: duas telas) e deixa de pedir redimensionamento ao servidor.
     const canvasWidth = () => page.evaluate(() => Math.round(document.querySelector('.graphic-mount canvas').getBoundingClientRect().width));
     assert.ok(await canvasWidth() > 64, 'no modo ajustar, a tela 64x64 deveria ser esticada para o painel');
-    await page.locator('.graphic-toolbar button', { hasText: 'Tamanho real' }).click({ force: true });
+    const zoom = async label => { await page.locator('.graphic-toolbar button', { hasText: '🔍' }).click({ force: true }); await page.locator('.ctx-item', { hasText: label }).click(); };
+    await zoom('100% (tamanho real)');
     await page.waitForFunction(() => Math.round(document.querySelector('.graphic-mount canvas').getBoundingClientRect().width) === 64);
-    assert.ok(await page.locator('.graphic-toolbar button', { hasText: 'Ajustar à janela' }).count(), 'o botão deveria trocar para "Ajustar à janela"');
-    await page.locator('.graphic-toolbar button', { hasText: 'Ajustar à janela' }).click({ force: true });
+    assert.ok(await page.locator('.graphic-toolbar button', { hasText: '🔍 100%' }).count(), 'o botão da lupa mostra o zoom atual');
+    await zoom('200%');
+    await page.waitForFunction(() => Math.round(document.querySelector('.graphic-mount canvas').getBoundingClientRect().width) === 128);
+    // Ctrl + roda do mouse afasta 10%.
+    const c = await page.locator('.graphic-mount canvas').boundingBox(); await page.mouse.move(c.x + 10, c.y + 10);
+    await page.keyboard.down('Control'); await page.mouse.wheel(0, 100); await page.keyboard.up('Control');
+    await page.waitForFunction(() => Math.round(document.querySelector('.graphic-mount canvas').getBoundingClientRect().width) === 116);
+    await zoom('Ajustar à altura');
+    await page.waitForFunction(() => { const m = document.querySelector('.graphic-mount').getBoundingClientRect(), r = document.querySelector('.graphic-mount canvas').getBoundingClientRect(); return Math.abs(r.height - (m.height - 14)) < 3; });
+    await zoom('Ajustar à janela');
     await page.waitForFunction(() => Math.round(document.querySelector('.graphic-mount canvas').getBoundingClientRect().width) > 64);
-    console.log('PASS: VNC alterna entre ajustar à janela e tamanho real (100%).');
+    console.log('PASS: lupa do VNC: 100%, 200%, Ctrl+roda, ajustar à altura e à janela.');
     // Botão Arquivos da barra VNC: o painel segue a sessão (origem VNC, modo TightVNC). Este servidor de
     // laboratório não é TightVNC, então a lista mostra o erro e oferece a rede do host (pergunta o sistema).
     await page.locator('.graphic-toolbar button', { hasText: 'Arquivos' }).click({ force: true });

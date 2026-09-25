@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 
-const TYPES = ['local', 'ssh', 'telnet', 'serial', 'rdp', 'vnc', 'ssh-x11', 'x11', 'xdmcp', 'rlogin', 'rsh'];
+const TYPES = ['local', 'ssh', 'telnet', 'serial', 'rdp', 'vnc', 'ssh-x11', 'x11', 'xdmcp', 'rlogin', 'rsh', 'web'];
 function text(value, max = 256) {
   if (typeof value !== 'string' || value.length > max || /[\x00-\x08\x0b-\x1f]/.test(value)) throw new Error('Texto inválido.');
   return value.trim();
@@ -37,6 +37,14 @@ function profile(input) {
   if (!input || !TYPES.includes(input.type)) throw new Error('Tipo de sessão inválido.');
   const p = { id: /^[a-zA-Z0-9-]{1,80}$/.test(input.id || '') ? input.id : randomUUID(), name: text(input.name || 'Sessão'), group: groupPath(input.group), type: input.type };
   if (p.type === 'x11') return p;
+  // Link: página de um servidor/equipamento (http/https), aberta no navegador padrão. host/port saem do
+  // endereço só para o status online da lista.
+  if (p.type === 'web') {
+    let url; try { url = new URL(text(input.url || '', 2048).trim()); } catch { throw new Error('Informe um endereço válido, ex.: https://10.0.0.1:8443'); }
+    if (!['http:', 'https:'].includes(url.protocol)) throw new Error('O link precisa começar com http:// ou https://.');
+    p.url = url.toString(); p.host = host(url.hostname.replace(/^\[|\]$/g, '')); p.port = port(url.port, url.protocol === 'https:' ? 443 : 80);
+    return p;
+  }
   if (p.type === 'local') {
     if (!['powershell', 'cmd', 'bash', 'wsl', 'busybox', 'msys2'].includes(input.shell)) throw new Error('Shell inválido.');
     p.shell = input.shell; p.cwd = text(input.cwd || '', 2048);

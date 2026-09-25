@@ -3,6 +3,8 @@ import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import RFB from '@novnc/novnc';
+// O pacote só exporta o RFB; a captura de mouse do noVNC vem do mesmo arquivo que o rfb.js usa (mesma instância).
+import { releaseCapture } from '../../node_modules/@novnc/novnc/core/util/events.js';
 import scancode from './rdpkeys.js';
 import { setup } from './extras.js';
 import { setupPackages } from './packages.js';
@@ -101,9 +103,10 @@ async function sessionForm(existing = {}) {
   let lastType = type;
   const result = await form({ title: existing.id ? 'Editar sessão' : 'Nova sessão', message: 'Preencha os dados da conexão. As opções extras ficam em Avançados.', accept: 'Salvar sessão', advancedFields: ['group', 'newGroup', 'cwd', 'port', 'remoteAppProgram', 'loadBalanceInfo', 'keyPath', 'useAgent', 'agentForward', 'proxyHost', 'proxyPort', 'jumpId'], fields: [
     { name: 'name', label: 'Nome', value: existing.name || '', required: true }, { name: 'group', label: 'Pasta', value: existing.group || 'Minhas sessões', options: [...new Set(['Minhas sessões', ...(state.config.folders || []), ...state.config.profiles.map(p => p.group)])].sort((a, b) => a.localeCompare(b)).map(f => ({ value: f, label: f })) },
-    { name: 'type', label: 'Protocolo', value: type, options: [{ value: 'ssh', label: 'SSH + SFTP' }, { value: 'local', label: 'Terminal local' }, { value: 'rdp', label: 'RDP integrado' }, { value: 'vnc', label: 'VNC integrado' }, { value: 'telnet', label: 'Telnet' }, { value: 'serial', label: 'Serial (8N1)' }, { value: 'x11', label: 'Servidor X11 local' }, { value: 'ssh-x11', label: 'SSH com aplicativos X11' }, { value: 'xdmcp', label: 'Área de trabalho XDMCP' }, { value: 'rlogin', label: 'Rlogin (sem criptografia)' }, { value: 'rsh', label: 'Rsh — executar comando (sem criptografia)' }] },
+    { name: 'type', label: 'Protocolo', value: type, options: [{ value: 'ssh', label: 'SSH + SFTP' }, { value: 'local', label: 'Terminal local' }, { value: 'rdp', label: 'RDP integrado' }, { value: 'vnc', label: 'VNC integrado' }, { value: 'web', label: 'Link (abre no navegador)' }, { value: 'telnet', label: 'Telnet' }, { value: 'serial', label: 'Serial (8N1)' }, { value: 'x11', label: 'Servidor X11 local' }, { value: 'ssh-x11', label: 'SSH com aplicativos X11' }, { value: 'xdmcp', label: 'Área de trabalho XDMCP' }, { value: 'rlogin', label: 'Rlogin (sem criptografia)' }, { value: 'rsh', label: 'Rsh — executar comando (sem criptografia)' }] },
     { name: 'shell', label: 'Shell local', value: existing.shell || 'powershell', options: ['powershell', 'cmd', 'bash', 'wsl', 'busybox', 'msys2'] },
     { name: 'cwd', label: 'Pasta inicial', value: existing.cwd || state.home, wide: true },
+    { name: 'url', label: 'Endereço (ex.: https://10.0.0.1:8443 ou http://switch.local)', value: existing.url || '', wide: true },
     { name: 'host', label: 'Host / IP', value: existing.host || '' }, { name: 'port', label: 'Porta (vazio = padrão)', type: 'number', value: existing.port || '', min: 1, max: 65535 },
     { name: 'username', label: 'Usuário / domínio\\usuário', value: existing.username || '' },
     { name: 'password', label: state.secrets?.[existing.id] ? 'Senha (guardada; deixe vazio para manter)' : 'Senha (opcional; guardada com criptografia do Windows)', type: 'password', wide: true },
@@ -122,9 +125,9 @@ async function sessionForm(existing = {}) {
   ], onChange: f => {
     const selected = f.elements.type.value;
     if (selected !== lastType) { f.elements.port.value = ''; lastType = selected; }
-    const show = ['name', 'group', 'newGroup', 'type', ...(selected === 'x11' ? [] : selected === 'xdmcp' ? ['host'] : selected === 'local' ? ['shell', 'cwd'] : selected === 'serial' ? ['device', 'baudRate'] : ['ssh', 'ssh-x11'].includes(selected) ? ['host', 'port', 'username', 'password', 'keyPath', 'useAgent', 'agentForward', 'proxyHost', 'proxyPort', 'jumpId'] : selected === 'rdp' ? ['host', 'port', 'username', 'password', 'resolution', 'remoteAppProgram', 'loadBalanceInfo'] : selected === 'rlogin' ? ['host', 'port', 'username'] : selected === 'rsh' ? ['host', 'port', 'username', 'command'] : ['host', 'port'])];
+    const show = ['name', 'group', 'newGroup', 'type', ...(selected === 'web' ? ['url'] : selected === 'x11' ? [] : selected === 'xdmcp' ? ['host'] : selected === 'local' ? ['shell', 'cwd'] : selected === 'serial' ? ['device', 'baudRate'] : ['ssh', 'ssh-x11'].includes(selected) ? ['host', 'port', 'username', 'password', 'keyPath', 'useAgent', 'agentForward', 'proxyHost', 'proxyPort', 'jumpId'] : selected === 'rdp' ? ['host', 'port', 'username', 'password', 'resolution', 'remoteAppProgram', 'loadBalanceInfo'] : selected === 'rlogin' ? ['host', 'port', 'username'] : selected === 'rsh' ? ['host', 'port', 'username', 'command'] : ['host', 'port'])];
     for (const field of $('dialog-fields').querySelectorAll('[data-field]')) { field.hidden = !show.includes(field.dataset.field); for (const input of field.querySelectorAll('input,select')) input.disabled = field.hidden; }
-    f.elements.host.required = show.includes('host');
+    f.elements.host.required = show.includes('host'); f.elements.url.required = selected === 'web';
     f.elements.command.required = selected === 'rsh';
   } });
   if (!result) return;
@@ -140,6 +143,8 @@ function scheduleSaveOpen() { clearTimeout(saveOpenTimer); saveOpenTimer = setTi
 async function openSession(profile) {
   if (sessions.size >= 24) throw new Error('Limite de 24 sessões nesta versão.');
   if (profile.type === 'local' && ['busybox', 'msys2'].includes(profile.shell)) { if (profile.shell === 'msys2') toast('Preparando o ambiente Unix (MSYS2). Na primeira vez pode levar alguns minutos…'); await call('tools:install', profile.shell); }
+  // Link: abre a página do servidor no navegador padrão (não vira aba).
+  if (profile.type === 'web') { await call('links:openProfile', profile.id); toast(`${profile.name}: aberto no navegador.`); return; }
   toast(`Abrindo ${profile.name}…`);
   const graphical = ['rdp', 'vnc', 'x11', 'xdmcp'].includes(profile.type);
   const result = await call(graphical ? 'graphics:open' : 'terminal:open', profile);
@@ -209,16 +214,44 @@ async function openSession(profile) {
         keyQueue.push([keysym, code, down]);
         if (!keyTimer) keyTimer = setTimeout(flushKeys, Math.max(0, KEY_GAP_MS - (performance.now() - lastKeyAt)));
       };
-      // Modo de exibição, lembrado por sessão: "ajustar" encolhe a tela remota inteira para caber no painel;
-      // "real" mostra 100% com barras de rolagem (útil com duas telas) e não pede ao servidor para
-      // redimensionar a sessão, para não reorganizar a área de trabalho remota.
+      // Lupa, lembrada por sessão: "fit" encolhe a tela remota inteira para caber no painel; "width"/"height"
+      // preenchem a largura ou a altura (com duas telas lado a lado, "altura" deixa cada uma legível e a outra
+      // fica a uma rolagem de distância); um número é o zoom fixo (1 = tamanho real). Fora do "fit" o servidor
+      // não é pedido para redimensionar a sessão, para não reorganizar a área de trabalho remota.
       const viewKey = 'vnc-view:' + profile.id;
-      const setView = mode => {
-        item.vncView = mode; item.rfb.scaleViewport = mode === 'fit'; item.rfb.resizeSession = mode === 'fit';
-        if (item.viewButton) item.viewButton.textContent = mode === 'fit' ? '⤢ Tamanho real' : '⤡ Ajustar à janela';
-        try { localStorage.setItem(viewKey, mode); } catch { /* preferência opcional */ }
+      const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+      const zoomLabel = mode => mode === 'fit' ? 'Ajustar' : mode === 'width' ? 'Largura' : mode === 'height' ? 'Altura' : `${Math.round(mode * 100)}%`;
+      const originalUpdateScale = item.rfb._updateScale.bind(item.rfb);
+      // noVNC só conhece "ajustar" e 100%: para os outros modos calcula a escala aqui (também ao redimensionar o painel).
+      item.rfb._updateScale = () => {
+        const mode = item.vncView, rfb = item.rfb;
+        if (mode === 'fit' || !rfb._display || !rfb._fbWidth) return originalUpdateScale();
+        const bar = 14, box = item.mount.getBoundingClientRect();
+        const scale = mode === 'width' ? (box.width - bar) / rfb._fbWidth : mode === 'height' ? (box.height - bar) / rfb._fbHeight : mode;
+        rfb._display.scale = Math.max(0.1, scale); rfb._fixScrollbars();
       };
-      let savedView = 'fit'; try { savedView = localStorage.getItem(viewKey) === 'real' ? 'real' : 'fit'; } catch { /* sem armazenamento */ }
+      const setView = mode => {
+        if (mode !== 'fit' && mode !== 'width' && mode !== 'height') mode = Math.min(4, Math.max(0.25, Number(mode) || 1));
+        item.vncView = mode; item.rfb.scaleViewport = mode === 'fit'; item.rfb.resizeSession = mode === 'fit';
+        item.rfb._updateScale();
+        if (item.viewButton) { item.viewButton.textContent = `🔍 ${zoomLabel(mode)}`; item.viewButton.title = 'Lupa: ajustar, largura, altura ou zoom (Ctrl + roda do mouse)'; }
+        try { localStorage.setItem(viewKey, String(mode)); } catch { /* preferência opcional */ }
+      };
+      const openZoomMenu = () => {
+        const box = item.viewButton.getBoundingClientRect(), current = item.vncView;
+        const option = (mode, label) => ({ label: (mode === current ? '✓ ' : '   ') + label, action: () => setView(mode) });
+        tree?.openMenu(box.left, box.bottom + 4, [option('fit', 'Ajustar à janela (tela inteira)'), option('width', 'Ajustar à largura'), option('height', 'Ajustar à altura (bom para duas telas)'), '-',
+          ...ZOOMS.map(z => option(z, z === 1 ? '100% (tamanho real)' : `${Math.round(z * 100)}%`))]);
+      };
+      // Ctrl + roda do mouse sobre a tela: aproxima/afasta 10% por passo (sem mandar a rolagem ao servidor).
+      item.mount.addEventListener('wheel', event => {
+        if (!event.ctrlKey) return;
+        event.preventDefault(); event.stopPropagation();
+        const now = typeof item.vncView === 'number' ? item.vncView : item.rfb._display?.scale || 1;
+        setView(Math.round(now * (event.deltaY < 0 ? 1.1 : 1 / 1.1) * 100) / 100);
+      }, { capture: true, passive: false });
+      let savedView = 'fit';
+      try { const saved = localStorage.getItem(viewKey); savedView = saved === 'real' ? 1 : ['fit', 'width', 'height'].includes(saved) ? saved : Number(saved) || 'fit'; } catch { /* sem armazenamento */ }
       setView(savedView);
       item.rfb.addEventListener('credentialsrequired', safe(async () => {
         const credentials = await form({ title: 'Autenticação VNC', fields: [{ name: 'username', label: 'Usuário (quando exigido)' }, { name: 'password', label: 'Senha', type: 'password' }] });
@@ -256,7 +289,7 @@ async function openSession(profile) {
         if (text && (force || text !== lastText)) { lastText = text; item.rfb.clipboardPasteFrom(toLatin1(text)); }
       };
       const sendClipboard = () => safe(() => syncClipboard(true))();
-      item.clipboardTimer = setInterval(() => { if (activeId === item.id && document.hasFocus()) safe(syncClipboard)(); }, 1000);
+      item.clipboardTimer = setInterval(() => { if ((activeId === item.id || item.popout) && item.pane.ownerDocument.hasFocus()) safe(syncClipboard)(); }, 1000);
       // Voltou para o app depois de copiar em outro programa: manda já, antes de dar tempo de apertar Ctrl+V.
       window.addEventListener('focus', () => { if (activeId === item.id && !item.ended) safe(syncClipboard)(); });
       // Ctrl+V / Shift+Insert: usa o colar nativo do Chromium (o evento paste chega na ordem das teclas e já
@@ -328,7 +361,7 @@ async function openSession(profile) {
         button('📋 Colar texto', sendClipboard),
         button('↗ TightVNC Viewer (janela separada)', async () => { const r = await call('vnc:openViewer', profile); toast(`Abrindo no TightVNC Viewer, em janela própria (${r.viewer}). A senha é pedida por ele.`); }),
         // Arquivos pelo TightVNC (tightft.cjs); se o servidor não permitir, o painel oferece a rede do host (C$/SSH).
-        (item.viewButton = button('', () => setView(item.vncView === 'fit' ? 'real' : 'fit'))),
+        (item.viewButton = button('', openZoomMenu)),
         button('📁 Arquivos', async () => { activeId = item.id; $('file-panel').hidden = false; layout(); await syncFiles(true); }),
         fullscreenButton(item.pane)
       );
@@ -556,12 +589,56 @@ async function closeSession(id, force = false) {
   const item = sessions.get(id); if (!item) return;
   if (!force && !item.ended && !await form({ title: 'Encerrar sessão?', message: item.name, fields: [], accept: 'Encerrar' })) return;
   await call(item.graphical ? 'graphics:close' : 'terminal:close', id);
+  item.closing = true; try { item.popout?.close(); } catch { /* já fechada */ } item.popout = null;
   clearInterval(item.clipboardTimer); if (item.tightId) call('files:tightClose', item.tightId).catch(() => {}); item.rfb?.disconnect(); try { item.rdpSession?.shutdown(); } catch { /* já encerrada */ } item.terminal?.dispose(); item.pane.remove(); sessions.delete(id);
   if (activeId === id) activeId = [...sessions.keys()].at(-1);
   layout(); scheduleSaveOpen();
 }
+// ---------- Sessão em janela separada (outro monitor) ----------
+// A janela nova é filha desta (mesmo processo, about:blank): o painel da sessão é MOVIDO para lá vivo — a
+// conexão, o terminal e a tela VNC/RDP continuam rodando aqui, sem reconectar. Fechar a janela devolve a sessão.
+function popOut(item, at = null) {
+  if (item.popout) { item.popout.focus(); return; }
+  if (['x11', 'xdmcp'].includes(item.profile.type)) throw new Error('Sessões X11 já abrem em janela própria.');
+  const box = item.pane.getBoundingClientRect(), width = Math.max(640, Math.round(box.width)), height = Math.max(420, Math.round(box.height));
+  const place = at ? `,left=${Math.round(at.x - 60)},top=${Math.round(at.y - 20)}` : '';
+  const child = window.open('about:blank', 'stanis-popout-' + String(item.id).replace(/[^\w-]/g, ''), `width=${width},height=${height}${place}`);
+  if (!child) throw new Error('Não foi possível abrir a janela separada.');
+  const doc = child.document;
+  doc.title = `${item.name} — Stanis Terminal`;
+  for (const node of document.querySelectorAll('link[rel=stylesheet], style')) {
+    const copy = doc.importNode(node, true); if (node.href) copy.href = node.href; doc.head.append(copy);
+  }
+  doc.documentElement.className = document.documentElement.className; doc.body.className = `${document.body.className} popout-window`;
+  const host = doc.createElement('div'); host.id = 'panes'; host.className = 'popout-host'; doc.body.append(host);
+  host.append(doc.adoptNode(item.pane)); item.pane.hidden = false; item.popout = child;
+  const refit = () => requestAnimationFrame(() => { item.fit?.fit(); item.rfb?._updateScale?.(); });
+  child.addEventListener('resize', refit); refit();
+  // O noVNC "captura" o mouse com uma camada no documento principal e só a solta quando o botão é solto aqui;
+  // soltando na janela separada, a camada ficava e a janela principal parava de aceitar cliques.
+  for (const type of ['mouseup', 'pointerup', 'blur']) child.addEventListener(type, () => setTimeout(releaseCapture, 0), true);
+  // Fechar a janela (X) devolve a sessão para as abas em vez de encerrá-la.
+  const returnHome = () => { if (item.popout === child && !item.closing) dockBack(item, false); };
+  child.addEventListener('beforeunload', returnHome); child.addEventListener('pagehide', returnHome);
+  // Se a janela sumir sem avisar (fechada pelo sistema), devolve do mesmo jeito.
+  const watch = setInterval(() => { if (item.popout !== child) clearInterval(watch); else if (child.closed) { clearInterval(watch); returnHome(); } }, 1000);
+  if (activeId === item.id) activeId = [...sessions.values()].find(other => !other.popout)?.id ?? activeId;
+  layout(); setTimeout(() => { child.focus(); item.terminal?.focus(); }, 50);
+}
+function dockBack(item, close = true) {
+  const child = item.popout; if (!child) return;
+  item.popout = null; $('panes').append(document.adoptNode(item.pane));
+  if (close) try { child.close(); } catch { /* já fechada */ }
+  activeId = item.id; layout(); requestAnimationFrame(() => { item.fit?.fit(); item.rfb?._updateScale?.(); item.terminal?.focus(); });
+}
+const dockAll = () => { for (const item of sessions.values()) dockBack(item); window.focus(); };
+window.addEventListener('beforeunload', () => { for (const item of sessions.values()) try { item.popout?.close(); } catch { /* ignora */ } });
+const dockButton = button('⧈ Trazer janelas', dockAll); dockButton.id = 'dock-all'; dockButton.title = 'Trazer de volta todas as sessões abertas em janelas separadas'; dockButton.hidden = true;
+document.querySelector('.toolbar-actions').prepend(dockButton);
+
 function renderTabs() {
-  const signature = JSON.stringify([...sessions.values()].map(item => [item.id, item.name, item.ended]));
+  dockButton.hidden = ![...sessions.values()].some(item => item.popout);
+  const signature = JSON.stringify([...sessions.values()].map(item => [item.id, item.name, item.ended, !!item.popout]));
   const rebuild = $('tabs').dataset.signature !== signature;
   if (rebuild) { $('tabs').replaceChildren(); $('tabs').dataset.signature = signature; }
   for (const item of sessions.values()) {
@@ -569,9 +646,19 @@ function renderTabs() {
     const tab = elem('div', '', 'tab' + (item.id === activeId ? ' active' : '')); tab.setAttribute('role', 'tab'); tab.setAttribute('aria-selected', String(item.id === activeId));
     tab.dataset.id = String(item.id);
     tab.ondblclick = event => { if (event.target.closest('button')) return; activeId = item.id; setFocusMode(!document.body.classList.contains('focus-mode')); };
-    tab.append(elem('span', (item.ended ? '○ ' : '● ') + item.name));
+    tab.append(elem('span', (item.ended ? '○ ' : '● ') + (item.popout ? '⧉ ' : '') + item.name));
+    if (!['x11', 'xdmcp'].includes(item.profile.type)) {
+      const detach = button(item.popout ? '⧈' : '⧉', event => { event.stopPropagation(); return item.popout ? dockBack(item) : popOut(item); }, 'tab-detach');
+      detach.title = item.popout ? 'Trazer de volta para as abas' : 'Abrir em janela separada (ou arraste a aba para fora)'; tab.append(detach);
+      // Arrastar a aba para fora da janela do app abre a sessão numa janela separada, onde foi solta.
+      tab.draggable = !item.popout;
+      tab.ondragend = event => {
+        const inside = event.screenX >= window.screenX && event.screenX <= window.screenX + window.outerWidth && event.screenY >= window.screenY && event.screenY <= window.screenY + window.outerHeight;
+        if (!inside && (event.screenX || event.screenY)) safe(() => popOut(item, { x: event.screenX, y: event.screenY }))();
+      };
+    }
     const close = button('✕', event => { event.stopPropagation(); return closeSession(item.id); }); close.title = 'Fechar sessão'; tab.append(close);
-    tab.onclick = event => { if (event.target.closest('button')) return; activeId = item.id; layout(); item.terminal?.focus(); }; $('tabs').append(tab);
+    tab.onclick = event => { if (event.target.closest('button')) return; if (item.popout) { item.popout.focus(); return; } activeId = item.id; layout(); item.terminal?.focus(); }; $('tabs').append(tab);
     item.pane.classList.toggle('selected', item.id === activeId);
   }
   const item = current(); const labelText = item ? `${item.profile.type.toUpperCase()}  /  ${item.profile.host || item.profile.shell || item.profile.device || 'Local'}  /  ${item.name}` : 'Pronto para conectar'; $('session-label').textContent = labelText; $('session-label').title = labelText;
@@ -590,9 +677,10 @@ function layout() {
   // Tarefa 3: classe body.no-sessions quando não há sessões abertas
   document.body.classList.toggle('no-sessions', sessions.size === 0);
 
-  const ids = [...sessions.keys()]; const selected = split ? [activeId, ...ids.filter(id => id !== activeId)].slice(0, 4) : [activeId];
+  // Sessões em janela separada ficam fora da divisão e das abas visíveis daqui.
+  const ids = [...sessions.values()].filter(item => !item.popout).map(item => item.id); const selected = split ? [activeId, ...ids.filter(id => id !== activeId)].filter(id => ids.includes(id)).slice(0, 4) : [activeId];
   $('panes').classList.toggle('split', split && sessions.size > 1); $('panes').classList.toggle('many', split && selected.length > 2);
-  for (const item of sessions.values()) item.pane.hidden = !selected.includes(item.id);
+  for (const item of sessions.values()) if (!item.popout) item.pane.hidden = !selected.includes(item.id);
   requestAnimationFrame(() => { for (const item of sessions.values()) if (!item.pane.hidden) item.fit?.fit(); updateNativeBounds(); });
   syncFiles(); updateToolbarMore();
 }

@@ -377,6 +377,12 @@ function register() {
     }
     return { config: config.value, added: prepared.added, skipped: prepared.skipped };
   });
+  // Sessão do tipo Link salva pela própria pessoa: abre no navegador padrão sem perguntar de novo.
+  handle('links:openProfile', async id => {
+    const saved = config.value.profiles.find(p => p.id === text(id, 80) && p.type === 'web');
+    if (!saved) throw new Error('Sessão de link não encontrada.');
+    await shell.openExternal(saved.url); return saved.url;
+  });
   handle('links:open', async url => {
     let parsed; try { parsed = new URL(text(url, 2048)); } catch { throw new Error('Endereço inválido.'); }
     if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Só é permitido abrir links http:// ou https://.');
@@ -446,7 +452,16 @@ app.whenReady().then(async () => {
     });
     window = new BrowserWindow({ width: 1440, height: 900, minWidth: 900, minHeight: 600, show: false, backgroundColor: '#0c111b', title: 'Stanis Terminal', icon: path.join(__dirname, 'ui/icon.ico'), webPreferences: { preload: path.join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, spellcheck: false } });
     Menu.setApplicationMenu(null);
-    window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    // Só a janela de sessão destacada (about:blank com nome stanis-popout-…) pode abrir: é o próprio app movendo
+    // o painel de uma sessão para outra janela/monitor. Qualquer outro window.open continua negado.
+    window.webContents.setWindowOpenHandler(({ url, frameName }) => url === 'about:blank' && /^stanis-popout-[\w-]{1,80}$/.test(frameName)
+      ? { action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true, backgroundColor: '#0c111b', icon: path.join(__dirname, 'ui/icon.ico'), minWidth: 360, minHeight: 240 } }
+      : { action: 'deny' });
+    window.webContents.on('did-create-window', child => {
+      child.setMenu(null);
+      child.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      child.webContents.on('will-navigate', event => event.preventDefault());
+    });
     window.webContents.on('will-navigate', event => event.preventDefault());
     const ssh = new SSH(config, ask, safeStorage); terminals = new Sessions(ssh, emit); files = new Files(terminals, ask); transfers = new Transfers(files, emit); tools = new Tools(config.directory, ask, { afterInstall: async (id, file) => {
       // Primeiro uso do MSYS2: inicializa o chaveiro do pacman (o próprio MSYS2 consulta o servidor de chaves nessa etapa).

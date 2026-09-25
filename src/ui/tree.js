@@ -10,7 +10,7 @@ export function icon(name, size = 14) {
   const path = document.createElementNS(SVG, 'path'); path.setAttribute('d', ICONS[name]); path.setAttribute('fill', name === 'folder' ? 'currentColor' : 'none'); path.setAttribute('fill-opacity', '.18'); path.setAttribute('stroke', 'currentColor'); path.setAttribute('stroke-width', name === 'more' ? '2.2' : '1.3'); path.setAttribute('stroke-linecap', 'round'); path.setAttribute('stroke-linejoin', 'round');
   svg.append(path); return svg;
 }
-const BADGE = { local: '>_', ssh: 'SSH', 'ssh-x11': 'X11', rdp: 'RDP', vnc: 'VNC', serial: 'COM', telnet: 'TEL', rlogin: 'RLG', rsh: 'RSH', x11: 'X11', xdmcp: 'XDM' };
+const BADGE = { local: '>_', ssh: 'SSH', 'ssh-x11': 'X11', rdp: 'RDP', vnc: 'VNC', serial: 'COM', telnet: 'TEL', rlogin: 'RLG', rsh: 'RSH', x11: 'X11', xdmcp: 'XDM', web: 'WEB' };
 const ROOT = 'Minhas sessões';
 
 export function setupTree(ctx) {
@@ -21,7 +21,7 @@ export function setupTree(ctx) {
   let dragging = null, menu = null;
 
   // ---------- Status online (como o mRemoteNG): fundo do selo verde/vermelho conforme a porta responde ----------
-  const PORTS = { rdp: 3389, vnc: 5900, ssh: 22, 'ssh-x11': 22, telnet: 23, rlogin: 513, rsh: 514 };
+  const PORTS = { rdp: 3389, vnc: 5900, ssh: 22, 'ssh-x11': 22, telnet: 23, rlogin: 513, rsh: 514, web: 443 };
   // Sessões locais, seriais ou via gateway SSH/proxy não dá para testar direto: ficam sem cor.
   const target = p => PORTS[p.type] && p.host && !p.jumpId && !p.proxyHost ? `${p.host}:${p.port || PORTS[p.type]}` : null;
   const reach = new Map(); let checking = false, lastCheck = 0;
