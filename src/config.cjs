@@ -43,6 +43,9 @@ function profile(input) {
     let url; try { url = new URL(text(input.url || '', 2048).trim()); } catch { throw new Error('Informe um endereço válido, ex.: https://10.0.0.1:8443'); }
     if (!['http:', 'https:'].includes(url.protocol)) throw new Error('O link precisa começar com http:// ou https://.');
     p.url = url.toString(); p.host = host(url.hostname.replace(/^\[|\]$/g, '')); p.port = port(url.port, url.protocol === 'https:' ? 443 : 80);
+    // Manter a página ativa (evita logout por inatividade): ligado por padrão, a cada 1–60 minutos.
+    p.keepAlive = input.keepAlive !== false;
+    const minutes = Number(input.keepAliveMinutes || 4); p.keepAliveMinutes = Number.isInteger(minutes) && minutes >= 1 && minutes <= 60 ? minutes : 4;
     return p;
   }
   if (p.type === 'local') {

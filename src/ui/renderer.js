@@ -107,6 +107,8 @@ async function sessionForm(existing = {}) {
     { name: 'shell', label: 'Shell local', value: existing.shell || 'powershell', options: ['powershell', 'cmd', 'bash', 'wsl', 'busybox', 'msys2'] },
     { name: 'cwd', label: 'Pasta inicial', value: existing.cwd || state.home, wide: true },
     { name: 'url', label: 'Endereço (ex.: https://10.0.0.1:8443 ou http://switch.local)', value: existing.url || '', wide: true },
+    { name: 'keepAlive', label: 'Manter a página ativa (não deslogar por inatividade)', type: 'checkbox', value: existing.keepAlive !== false, wide: true },
+    { name: 'keepAliveMinutes', label: 'Sinal de atividade a cada (minutos)', type: 'number', value: existing.keepAliveMinutes || 4, min: 1, max: 60 },
     { name: 'host', label: 'Host / IP', value: existing.host || '' }, { name: 'port', label: 'Porta (vazio = padrão)', type: 'number', value: existing.port || '', min: 1, max: 65535 },
     { name: 'username', label: 'Usuário / domínio\\usuário', value: existing.username || '' },
     { name: 'password', label: state.secrets?.[existing.id] ? 'Senha (guardada; deixe vazio para manter)' : 'Senha (opcional; guardada com criptografia do Windows)', type: 'password', wide: true },
@@ -125,7 +127,7 @@ async function sessionForm(existing = {}) {
   ], onChange: f => {
     const selected = f.elements.type.value;
     if (selected !== lastType) { f.elements.port.value = ''; lastType = selected; }
-    const show = ['name', 'group', 'newGroup', 'type', ...(selected === 'web' ? ['url'] : selected === 'x11' ? [] : selected === 'xdmcp' ? ['host'] : selected === 'local' ? ['shell', 'cwd'] : selected === 'serial' ? ['device', 'baudRate'] : ['ssh', 'ssh-x11'].includes(selected) ? ['host', 'port', 'username', 'password', 'keyPath', 'useAgent', 'agentForward', 'proxyHost', 'proxyPort', 'jumpId'] : selected === 'rdp' ? ['host', 'port', 'username', 'password', 'resolution', 'remoteAppProgram', 'loadBalanceInfo'] : selected === 'rlogin' ? ['host', 'port', 'username'] : selected === 'rsh' ? ['host', 'port', 'username', 'command'] : ['host', 'port'])];
+    const show = ['name', 'group', 'newGroup', 'type', ...(selected === 'web' ? ['url', 'keepAlive', 'keepAliveMinutes'] : selected === 'x11' ? [] : selected === 'xdmcp' ? ['host'] : selected === 'local' ? ['shell', 'cwd'] : selected === 'serial' ? ['device', 'baudRate'] : ['ssh', 'ssh-x11'].includes(selected) ? ['host', 'port', 'username', 'password', 'keyPath', 'useAgent', 'agentForward', 'proxyHost', 'proxyPort', 'jumpId'] : selected === 'rdp' ? ['host', 'port', 'username', 'password', 'resolution', 'remoteAppProgram', 'loadBalanceInfo'] : selected === 'rlogin' ? ['host', 'port', 'username'] : selected === 'rsh' ? ['host', 'port', 'username', 'command'] : ['host', 'port'])];
     for (const field of $('dialog-fields').querySelectorAll('[data-field]')) { field.hidden = !show.includes(field.dataset.field); for (const input of field.querySelectorAll('input,select')) input.disabled = field.hidden; }
     f.elements.host.required = show.includes('host'); f.elements.url.required = selected === 'web';
     f.elements.command.required = selected === 'rsh';
@@ -140,11 +142,67 @@ let tree = null;
 function renderProfiles() { tree ??= setupTree({ $, api, call, form, toast, safe, elem, state: () => state, openSession, sessionForm, localProfile }); tree.render(); }
 let saveOpenTimer;
 function scheduleSaveOpen() { clearTimeout(saveOpenTimer); saveOpenTimer = setTimeout(() => call('session:saveOpen', [...sessions.values()].map(s => ({ profile: s.profile }))).catch(() => {}), 800); }
+// ---------- Sessão Link: página do servidor numa aba ----------
+// <webview> no perfil isolado persist:stanis-web (cookies/login guardados só para as páginas das sessões Link,
+// sem acesso ao app). "Manter ativa": a cada N minutos um movimento de mouse de verdade na página e uma
+// requisição silenciosa à própria página com o login atual — zeram o contador de inatividade da página e do
+// servidor, então ela não desloga sozinha.
+function openWebSession(profile) {
+  if (sessions.size >= 24) throw new Error('Limite de 24 sessões nesta versão.');
+  const item = { id: 'web-' + crypto.randomUUID(), profile, name: profile.name, graphical: true, web: true, ended: false };
+  item.pane = elem('section', '', 'pane'); item.pane.dataset.session = item.id;
+  item.pane.addEventListener('mousedown', () => { activeId = item.id; renderTabs(); });
+  sessions.set(item.id, item); $('panes').append(item.pane); activeId = item.id; layout();
+  item.mount = elem('div', '', 'graphic-mount web-mount'); item.pane.append(item.mount);
+  const address = elem('span', profile.url, 'web-address');
+  const keepButton = button('', () => setKeepAlive(!item.keepAlive));
+  const setKeepAlive = on => {
+    item.keepAlive = on; clearInterval(item.keepTimer);
+    keepButton.textContent = on ? `⏱ Manter ativa: ${profile.keepAliveMinutes || 4} min` : '⏱ Manter ativa: desligado';
+    keepButton.title = on ? 'A página recebe um sinal de atividade periodicamente para não deslogar por inatividade. Clique para desligar.' : 'Clique para manter a página ativa (evita logout por inatividade).';
+    if (on) item.keepTimer = setInterval(() => safe(() => keepAlive(item))(), (profile.keepAliveMinutes || 4) * 60000);
+  };
+  const bar = elem('div', '', 'graphic-toolbar web-toolbar');
+  bar.append(
+    button('←', () => item.webview.canGoBack() && item.webview.goBack()), button('→', () => item.webview.canGoForward() && item.webview.goForward()), button('↻', () => item.webview.reload()),
+    address, keepButton,
+    button('🌐 Navegador', () => call('links:openProfile', profile.id)),
+    fullscreenButton(item.pane)
+  );
+  bar.children[0].title = 'Voltar'; bar.children[1].title = 'Avançar'; bar.children[2].title = 'Recarregar'; bar.children[5].title = 'Abrir no navegador padrão (fora do app)';
+  item.pane.append(bar); setKeepAlive(profile.keepAlive !== false);
+  item.address = address; attachWebview(item, document, profile.url);
+  toast(`Abrindo ${profile.name}…`); scheduleSaveOpen();
+  return item;
+}
+// Cria o <webview> da sessão (perfil isolado persist:stanis-web) e liga a barra de endereço aos eventos dele.
+function attachWebview(item, doc, url) {
+  const old = item.webview; item.webview = null;
+  if (old) try { old.remove(); } catch { /* já descartado */ }
+  const view = doc.createElement('webview');
+  view.setAttribute('partition', 'persist:stanis-web'); view.setAttribute('allowpopups', ''); view.setAttribute('src', url);
+  item.mount.append(view); item.webview = view;
+  const { profile, address } = item;
+  const showUrl = event => { address.textContent = event.url; address.title = event.url; };
+  view.addEventListener('did-navigate', showUrl); view.addEventListener('did-navigate-in-page', event => { if (event.isMainFrame) showUrl(event); });
+  view.addEventListener('did-start-loading', () => { $('status').textContent = `${profile.name}: carregando…`; });
+  view.addEventListener('did-stop-loading', () => { $('status').textContent = `${profile.name}: pronto.`; });
+  view.addEventListener('did-fail-load', event => { if (event.isMainFrame && event.errorCode !== -3) toast(`${profile.name}: não foi possível abrir (${event.errorDescription || event.errorCode}).`); });
+}
+async function keepAlive(item) {
+  const view = item.webview; if (!view || item.ended || !item.keepAlive) return;
+  // Movimento de mouse real (evento confiável) dentro da página, sem clicar em nada.
+  const x = 5 + Math.floor(Math.random() * 20), y = 5 + Math.floor(Math.random() * 20);
+  view.sendInputEvent({ type: 'mouseMove', x, y }); view.sendInputEvent({ type: 'mouseMove', x: x + 1, y: y + 1 });
+  // Requisição à própria página com os cookies do login: renova a sessão no servidor.
+  await view.executeJavaScript(`fetch(location.href, { credentials: 'include', cache: 'no-store' }).then(() => true, () => false)`, false);
+  item.lastKeepAlive = Date.now();
+}
+
 async function openSession(profile) {
   if (sessions.size >= 24) throw new Error('Limite de 24 sessões nesta versão.');
   if (profile.type === 'local' && ['busybox', 'msys2'].includes(profile.shell)) { if (profile.shell === 'msys2') toast('Preparando o ambiente Unix (MSYS2). Na primeira vez pode levar alguns minutos…'); await call('tools:install', profile.shell); }
-  // Link: abre a página do servidor no navegador padrão (não vira aba).
-  if (profile.type === 'web') { await call('links:openProfile', profile.id); toast(`${profile.name}: aberto no navegador.`); return; }
+  if (profile.type === 'web') return openWebSession(profile);
   toast(`Abrindo ${profile.name}…`);
   const graphical = ['rdp', 'vnc', 'x11', 'xdmcp'].includes(profile.type);
   const result = await call(graphical ? 'graphics:open' : 'terminal:open', profile);
@@ -588,7 +646,11 @@ async function paste(item, text) {
 async function closeSession(id, force = false) {
   const item = sessions.get(id); if (!item) return;
   if (!force && !item.ended && !await form({ title: 'Encerrar sessão?', message: item.name, fields: [], accept: 'Encerrar' })) return;
-  await call(item.graphical ? 'graphics:close' : 'terminal:close', id);
+  if (item.web) {
+    clearInterval(item.keepTimer); item.ended = true;
+    // Remover o <webview> libera a página (o Electron 44 ainda relata "Invalid guestInstanceId" no console; é inofensivo).
+    try { item.webview?.remove(); } catch { /* conteúdo já descartado */ }
+  } else await call(item.graphical ? 'graphics:close' : 'terminal:close', id);
   item.closing = true; try { item.popout?.close(); } catch { /* já fechada */ } item.popout = null;
   clearInterval(item.clipboardTimer); if (item.tightId) call('files:tightClose', item.tightId).catch(() => {}); item.rfb?.disconnect(); try { item.rdpSession?.shutdown(); } catch { /* já encerrada */ } item.terminal?.dispose(); item.pane.remove(); sessions.delete(id);
   if (activeId === id) activeId = [...sessions.keys()].at(-1);
@@ -600,6 +662,8 @@ async function closeSession(id, force = false) {
 function popOut(item, at = null) {
   if (item.popout) { item.popout.focus(); return; }
   if (['x11', 'xdmcp'].includes(item.profile.type)) throw new Error('Sessões X11 já abrem em janela própria.');
+  // O navegador embutido (<webview>) não funciona em janela filha: a aba de Link usa o botão 🌐 para abrir fora do app.
+  if (item.web) throw new Error('Abas de link não vão para janela separada: use 🌐 Navegador para abrir a página fora do app.');
   const box = item.pane.getBoundingClientRect(), width = Math.max(640, Math.round(box.width)), height = Math.max(420, Math.round(box.height));
   const place = at ? `,left=${Math.round(at.x - 60)},top=${Math.round(at.y - 20)}` : '';
   const child = window.open('about:blank', 'stanis-popout-' + String(item.id).replace(/[^\w-]/g, ''), `width=${width},height=${height}${place}`);
@@ -647,7 +711,7 @@ function renderTabs() {
     tab.dataset.id = String(item.id);
     tab.ondblclick = event => { if (event.target.closest('button')) return; activeId = item.id; setFocusMode(!document.body.classList.contains('focus-mode')); };
     tab.append(elem('span', (item.ended ? '○ ' : '● ') + (item.popout ? '⧉ ' : '') + item.name));
-    if (!['x11', 'xdmcp'].includes(item.profile.type)) {
+    if (!['x11', 'xdmcp', 'web'].includes(item.profile.type)) {
       const detach = button(item.popout ? '⧈' : '⧉', event => { event.stopPropagation(); return item.popout ? dockBack(item) : popOut(item); }, 'tab-detach');
       detach.title = item.popout ? 'Trazer de volta para as abas' : 'Abrir em janela separada (ou arraste a aba para fora)'; tab.append(detach);
       // Arrastar a aba para fora da janela do app abre a sessão numa janela separada, onde foi solta.

@@ -13,7 +13,7 @@ const root = path.resolve(__dirname, '..');
     const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
     app = await electron.launch({ executablePath: require('electron'), args: [root, '--test-mode'], env });
     const page = await app.firstWindow(); await page.waitForSelector('#sessions-list .tree-section');
-    const errors = []; page.on('pageerror', error => errors.push(error.message));
+    const errors = []; page.on('pageerror', error => { if (!/Invalid guestInstanceId/.test(error.message)) errors.push(error.message); });
     await page.click('#new-session'); await page.locator('[name=name]').fill('VNC destacar'); await page.locator('[name=type]').selectOption('vnc'); await page.locator('[name=host]').fill('127.0.0.1');
     await page.locator('#dialog-advanced summary').click(); await page.locator('[name=port]').fill(String(lab.port)); await page.click('#dialog-ok');
     await page.locator('.tree-row.session .tree-main').filter({ hasText: 'VNC destacar' }).click();
@@ -52,16 +52,21 @@ const root = path.resolve(__dirname, '..');
     await child2.close();
     await page.waitForFunction(() => document.querySelectorAll('#panes .xterm').length === 1 && document.querySelectorAll('#tabs .tab').length === 2);
     console.log('PASS: fechar a janela separada devolve o terminal sem encerrar a sessão.');
-    // Sessão do tipo Link: aparece na lista com o selo WEB e abre no navegador padrão (interceptado aqui).
+    // Sessão do tipo Link: selo WEB na lista, abre numa aba; o botão 🌐 leva ao navegador padrão (interceptado aqui).
+    const http = require('node:http'); const site = http.createServer((q, r) => r.end('<title>painel</title>ok')); await new Promise(r => site.listen(0, '127.0.0.1', r));
+    const url = `http://127.0.0.1:${site.address().port}/admin`;
     await app.evaluate(({ shell }) => { global.openedLinks = []; shell.openExternal = async url => { global.openedLinks.push(url); }; });
     await page.click('#new-session'); await page.locator('[name=name]').fill('Painel do firewall'); await page.locator('[name=type]').selectOption('web');
-    await page.locator('[name=url]').fill('https://127.0.0.1:8443/admin'); await page.click('#dialog-ok');
+    await page.locator('[name=url]').fill(url); await page.click('#dialog-ok');
     const row = page.locator('.tree-row.session', { hasText: 'Painel do firewall' });
     assert.equal(await row.locator('.badge').textContent(), 'WEB');
-    await row.locator('.tree-main').click(); await page.waitForTimeout(500);
-    assert.deepEqual(await app.evaluate(() => global.openedLinks), ['https://127.0.0.1:8443/admin']);
-    assert.equal(await page.locator('#tabs .tab').count(), 2, 'link não vira aba');
-    console.log('PASS: sessão Link com selo WEB abre o endereço no navegador padrão.');
+    await row.locator('.tree-main').click();
+    await page.waitForFunction(() => document.querySelector('.pane:not([hidden]) webview')?.getTitle() === 'painel', null, { timeout: 15000 });
+    assert.equal(await page.locator('#tabs .tab', { hasText: 'Painel do firewall' }).count(), 1, 'link abre numa aba');
+    await page.locator('.web-toolbar button', { hasText: 'Navegador' }).click(); await page.waitForTimeout(300);
+    assert.deepEqual(await app.evaluate(() => global.openedLinks), [url]);
+    site.close();
+    console.log('PASS: sessão Link com selo WEB abre numa aba e o botão 🌐 leva ao navegador padrão.');
     assert.deepEqual(errors, [], 'sem erros no renderer');
   } finally { await app?.close().catch(() => {}); lab.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

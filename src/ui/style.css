@@ -388,3 +388,10 @@ body.popout-window { margin: 0; height: 100vh; overflow: hidden; background: var
 .popout-host > .pane { display: block !important; min-height: 0; }
 .tab .tab-detach { opacity: .55; }
 .tab:hover .tab-detach, .tab.active .tab-detach { opacity: 1; }
+
+/* Sessão Link: barra fixa no topo (não flutua sobre a página) e a página embaixo. */
+.pane:has(> .web-mount):not([hidden]) { display: flex; flex-direction: column; padding: 0; }
+.pane > .web-toolbar { position: static; order: -1; transform: none; opacity: 1; pointer-events: auto; max-width: none; margin: 0; border-radius: 0; border: 0; border-bottom: 1px solid var(--line); box-shadow: none; padding: 4px 8px; align-items: center; background: var(--panel); }
+.web-toolbar .web-address { flex: 1; min-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--muted); padding: 0 8px; }
+.pane > .web-mount { position: relative; inset: auto; flex: 1; min-height: 0; background: #fff; }
+.web-mount webview { position: absolute; inset: 0; width: 100%; height: 100%; }

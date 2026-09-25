@@ -27,7 +27,11 @@ const { SerialPort } = require('serialport');
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'stanis', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
 const testMode = process.argv.includes('--test-mode');
-if (testMode) app.setPath('userData', process.env.STANIS_TEST_USERDATA || path.join(os.tmpdir(), 'stanis-terminal-test-' + process.pid));
+// Modo de teste: pasta de dados nova a cada execução (o Windows reaproveita números de processo, e uma pasta
+// antiga com o mesmo número fazia um teste abrir as sessões salvas de outro), apagada ao sair.
+const testData = testMode && !process.env.STANIS_TEST_USERDATA ? fs.mkdtempSync(path.join(os.tmpdir(), 'stanis-terminal-test-')) : null;
+if (testMode) app.setPath('userData', process.env.STANIS_TEST_USERDATA || testData);
+if (testData) app.on('will-quit', () => { try { fs.rmSync(testData, { recursive: true, force: true }); } catch { /* arquivos em uso: o sistema limpa a pasta temporária */ } });
 else if (process.env.PORTABLE_EXECUTABLE_DIR) app.setPath('userData', path.join(process.env.PORTABLE_EXECUTABLE_DIR, 'StanisTerminal-data'));
 else if (app.isPackaged) app.setPath('userData', path.join(path.dirname(app.getPath('exe')), 'StanisTerminal-data'));
 if (!testMode && !app.requestSingleInstanceLock()) app.quit();
@@ -450,17 +454,26 @@ app.whenReady().then(async () => {
       const allowed = graphics?.rdpProxyPort && details.url === `ws://127.0.0.1:${graphics.rdpProxyPort}/`;
       callback({ cancel: !allowed });
     });
-    window = new BrowserWindow({ width: 1440, height: 900, minWidth: 900, minHeight: 600, show: false, backgroundColor: '#0c111b', title: 'Stanis Terminal', icon: path.join(__dirname, 'ui/icon.ico'), webPreferences: { preload: path.join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, spellcheck: false } });
+    window = new BrowserWindow({ width: 1440, height: 900, minWidth: 900, minHeight: 600, show: false, backgroundColor: '#0c111b', title: 'Stanis Terminal', icon: path.join(__dirname, 'ui/icon.ico'), webPreferences: { preload: path.join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, spellcheck: false, webviewTag: true } });
     Menu.setApplicationMenu(null);
     // Só a janela de sessão destacada (about:blank com nome stanis-popout-…) pode abrir: é o próprio app movendo
     // o painel de uma sessão para outra janela/monitor. Qualquer outro window.open continua negado.
     window.webContents.setWindowOpenHandler(({ url, frameName }) => url === 'about:blank' && /^stanis-popout-[\w-]{1,80}$/.test(frameName)
       ? { action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true, backgroundColor: '#0c111b', icon: path.join(__dirname, 'ui/icon.ico'), minWidth: 360, minHeight: 240 } }
       : { action: 'deny' });
+    // Sessões do tipo Link: <webview> só com http/https, no perfil isolado persist:stanis-web, sem preload
+    // nem Node, e sem pausar os timers da página em segundo plano (senão o próprio "manter ativa" da página parava).
+    const guardWebview = (event, webPreferences, params) => {
+      delete webPreferences.preload;
+      Object.assign(webPreferences, { nodeIntegration: false, contextIsolation: true, sandbox: true, backgroundThrottling: false, webviewTag: false });
+      if (!/^https?:\/\//i.test(params.src || '') || params.partition !== WEB_PARTITION) event.preventDefault();
+    };
+    window.webContents.on('will-attach-webview', guardWebview);
     window.webContents.on('did-create-window', child => {
       child.setMenu(null);
       child.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
       child.webContents.on('will-navigate', event => event.preventDefault());
+      child.webContents.on('will-attach-webview', guardWebview); // aba de Link destacada: mesmas regras
     });
     window.webContents.on('will-navigate', event => event.preventDefault());
     const ssh = new SSH(config, ask, safeStorage); terminals = new Sessions(ssh, emit); files = new Files(terminals, ask); transfers = new Transfers(files, emit); tools = new Tools(config.directory, ask, { afterInstall: async (id, file) => {
@@ -486,3 +499,29 @@ app.whenReady().then(async () => {
   } catch (error) { console.error(error); dialog.showErrorBox('Stanis Terminal', error.message); app.quit(); }
 });
 app.on('window-all-closed', () => app.quit());
+
+// ---------- Navegador das sessões Link ----------
+const WEB_PARTITION = 'persist:stanis-web';
+app.on('web-contents-created', (_, contents) => {
+  if (contents.getType() !== 'webview') return;
+  const web = url => /^https?:\/\//i.test(url);
+  // Links que abririam outra janela (target=_blank) abrem na própria aba; esquemas estranhos são barrados.
+  contents.setWindowOpenHandler(({ url }) => { if (web(url)) contents.loadURL(url); return { action: 'deny' }; });
+  contents.on('will-navigate', (event, url) => { if (!web(url)) event.preventDefault(); });
+});
+app.whenReady().then(() => {
+  const web = session.fromPartition(WEB_PARTITION);
+  web.setPermissionRequestHandler((_, permission, callback) => callback(['fullscreen', 'clipboard-sanitized-write'].includes(permission)));
+});
+// Certificado próprio (comum em páginas de switch, firewall, iDRAC…): pergunta uma vez e lembra por host +
+// impressão digital, como a chave de um servidor SSH. Um certificado diferente depois pergunta de novo.
+app.on('certificate-error', (event, contents, url, error, certificate, callback) => {
+  if (contents.getType() !== 'webview') return callback(false);
+  event.preventDefault();
+  let hostPort; try { hostPort = new URL(url).host; } catch { return callback(false); }
+  const trusted = config.value.trustedWebCerts || {};
+  if (trusted[hostPort] === certificate.fingerprint) return callback(true);
+  ask({ title: 'Certificado não confiável', message: `${hostPort}\n${error}\nEmitido para: ${certificate.subjectName}\nEmitido por: ${certificate.issuerName}\nImpressão digital: ${certificate.fingerprint}\n\nPáginas de equipamentos costumam usar certificado próprio. Confiar neste certificado para ${hostPort}?`, fields: [], accept: 'Confiar' })
+    .then(answer => { if (answer) { config.value.trustedWebCerts = { ...trusted, [hostPort]: certificate.fingerprint }; config.save(); } callback(!!answer); })
+    .catch(() => callback(false));
+});
