@@ -9,7 +9,7 @@ import scancode from './rdpkeys.js';
 import { setup } from './extras.js';
 import { setupPackages } from './packages.js';
 import { setupTree } from './tree.js';
-import { highlight } from './highlight.js';
+import { highlight, createHighlightStream } from './highlight.js';
 
 // noVNC intencionalmente não expõe o motivo técnico da falha no evento 'disconnect' (só loga no console).
 // Capturamos aqui para poder mostrar algo além de "Conexão VNC interrompida." quando a negociação falha
@@ -266,7 +266,7 @@ async function openSession(profile) {
     terminal.loadAddon(new WebLinksAddon((_, uri) => safe(() => call('links:open', uri))())); extras.attach(item);
     // Teclas digitadas enquanto o texto a colar ainda está sendo lido esperam e seguem depois dele, na ordem.
     const typedDuringPaste = [];
-    terminal.onData(data => { if (item.pastePending && !item.injectingPaste) typedDuringPaste.push(data); else extras.input(item, data); });
+    terminal.onData(data => { item.lastInputAt = Date.now(); if (item.pastePending && !item.injectingPaste) typedDuringPaste.push(data); else extras.input(item, data); });
     terminal.onResize(safe(size => call('terminal:resize', item.id, size.cols, size.rows)));
     // Copiar/colar como o Windows Terminal e o PuTTY: Ctrl+V, Ctrl+Shift+V e Shift+Insert colam; Ctrl+C com
     // texto selecionado copia (sem seleção continua sendo o Ctrl+C que interrompe o comando); Ctrl+Shift+C e
@@ -864,7 +864,12 @@ function highlightOutput(item, data) {
   if (!state.config.settings.highlightErrors || item.profile?.type === 'local') return data;
   return highlight(data, state.config.settings.highlightSet, item.highlightState ??= {});
 }
-api.on('terminal:data', ({ id, data }) => { const item = sessions.get(id); if (item?.terminal) { item.terminal.write(highlightOutput(item, data)); extras?.output(item, data); } });
+// Cada sessão tem seu fluxo: junta pedaços de linha cortados antes de colorir (ver createHighlightStream).
+api.on('terminal:data', ({ id, data }) => {
+  const item = sessions.get(id); if (!item?.terminal) return;
+  item.outputStream ??= createHighlightStream({ color: text => highlightOutput(item, text), write: text => item.terminal.write(text), interactive: () => Date.now() - (item.lastInputAt || 0) < 200 });
+  item.outputStream.push(data); extras?.output(item, data);
+});
 api.on('terminal:exit', ({ id, code }) => { const item = sessions.get(id); if (item) { item.ended = true; item.terminal.writeln(`\r\n\x1b[90m[Sessão encerrada: ${code}]\x1b[0m`); renderTabs(); } });
 api.on('graphics:data', ({ id, data }) => { const item = sessions.get(id); if (item?.channel) item.channel.onmessage?.({ data: Uint8Array.from(atob(data), char => char.charCodeAt(0)).buffer }); });
 api.on('graphics:state', ({ id, type, message }) => {

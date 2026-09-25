@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { highlight } from '../src/ui/highlight.js';
+import { highlight, createHighlightStream } from '../src/ui/highlight.js';
 
 // Lista [cor hex, texto] de cada trecho colorido (cor de texto 38;2;r;g;b).
 function colored(output) {
@@ -52,4 +52,27 @@ test('prompt de equipamento/shell em negrito e comando digitado em destaque, sem
 test('linhas comuns que terminam em # ou > no meio do texto não viram prompt', () => {
   const out = highlight('Building configuration...\r\nCurrent configuration : 1234 bytes\r\n! comentario > nada\r\n', 'network', {});
   assert.doesNotMatch(out, /\x1b\[1;3\dm/);
+});
+
+test('saída picotada em qualquer tamanho sai com as mesmas cores e o mesmo texto que inteira (fluxo como o ChromaTerm)', () => {
+  const out = 'Interface              IP-Address      OK? Method Status                Protocol\r\nGigabitEthernet1/0/1   10.0.0.1        YES NVRAM  up                    up\r\nVlan10                 192.168.10.1    YES NVRAM  down                  down\r\n\x1b[32mSW-CORE#\x1b[0m';
+  const whole = highlight(out, 'network', {});
+  for (let size = 1; size <= 300; size++) {
+    const state = {}; let result = '';
+    const stream = createHighlightStream({ color: text => highlight(text, 'network', state), write: text => { result += text; } });
+    for (let i = 0; i < out.length; i += size) stream.push(out.slice(i, i + size));
+    stream.flush();
+    assert.equal(result, whole, `picotado em pedaços de ${size}`);
+  }
+});
+
+test('eco da digitação sai na hora; fim de linha cortado espera o resto e sai sozinho depois', async () => {
+  const written = []; let typing = true;
+  const stream = createHighlightStream({ color: text => text, write: text => written.push(text), interactive: () => typing, waitMs: 10 });
+  stream.push('s'); assert.deepEqual(written, ['s'], 'eco sem atraso');
+  typing = false; written.length = 0;
+  stream.push('linha completa\r\nGigabitEth'); assert.deepEqual(written, ['linha completa\r\n'], 'o pedaço cortado espera');
+  stream.push('ernet1/0/1 up\r\n'); assert.deepEqual(written, ['linha completa\r\n', 'GigabitEthernet1/0/1 up\r\n'], 'junta com o resto');
+  stream.push('SW-CORE#'); await new Promise(r => setTimeout(r, 40));
+  assert.equal(written.at(-1), 'SW-CORE#', 'o prompt sem quebra de linha sai sozinho após a espera');
 });

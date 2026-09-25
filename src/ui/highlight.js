@@ -67,6 +67,35 @@ function matchPrompt(line) {
   return null;
 }
 
+// ---------- Saída em pedaços (como o ChromaTerm) ----------
+// A saída do servidor chega picotada: uma palavra ("GigabitEthernet1/0/1") ou um código de cor do próprio servidor
+// cortado entre dois pedaços não era reconhecido, e a mesma saída saía às vezes colorida, às vezes não. Aqui as
+// linhas completas são coloridas na hora; o fim de linha cortado espera o resto (enquanto continuar chegando, até
+// maxHoldMs) antes de colorir — vale também para serial/Telnet lentos, que mandam tudo em pedaços pequenos.
+// Logo depois de a pessoa digitar (interactive()), o fim de linha sai na hora: o eco não pode atrasar.
+const INCOMPLETE_ESCAPE = /\x1b(?:\[[0-?]*[ -/]*|\][^\x07\x1b]*)?$/;
+export function createHighlightStream({ color, write, interactive = () => false, waitMs = 12, maxHoldMs = 100 }) {
+  let pending = '', timer = null, holdSince = 0;
+  const flush = () => { clearTimeout(timer); timer = null; holdSince = 0; if (pending) { const text = pending; pending = ''; write(color(text)); } };
+  return {
+    push(data) {
+      clearTimeout(timer); timer = null;
+      const buffer = pending + data; pending = '';
+      const lastBreak = Math.max(buffer.lastIndexOf('\n'), buffer.lastIndexOf('\r'));
+      const complete = buffer.slice(0, lastBreak + 1); let tail = buffer.slice(lastBreak + 1);
+      if (complete) { holdSince = 0; write(color(complete)); }
+      if (!tail) return;
+      // Código de escape cortado no fim: nunca é colorido nem mostrado pela metade.
+      const cut = INCOMPLETE_ESCAPE.exec(tail)?.[0] || '';
+      if (interactive() && data.length <= 32 && !cut) { holdSince = 0; write(color(tail)); return; } // eco de tecla: pedaço pequeno logo após digitar
+      const now = Date.now(); if (!holdSince) holdSince = now;
+      if (now - holdSince >= maxHoldMs) { const ready = tail.slice(0, tail.length - cut.length); if (ready) write(color(ready)); tail = cut; holdSince = cut ? now : 0; }
+      pending = tail; if (pending) timer = setTimeout(flush, waitMs);
+    },
+    flush,
+  };
+}
+
 // state (um objeto por sessão) lembra, entre um pedaço de saída e outro, se estamos no começo de uma linha e se
 // o cursor está depois de um prompt: o que o servidor ecoa dali em diante é o comando digitado, em destaque
 // até o Enter. Sem state, cada chamada começa no início de uma linha.
