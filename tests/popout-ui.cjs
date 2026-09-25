@@ -22,7 +22,7 @@ const root = path.resolve(__dirname, '..');
 
     // Destaca a sessão VNC pelo botão da aba.
     const opened = app.waitForEvent('window');
-    await page.locator('#tabs .tab', { hasText: 'VNC destacar' }).locator('.tab-detach').click();
+    await page.locator('#tabs .tab', { hasText: 'VNC destacar' }).hover(); await page.locator('#tabs .tab', { hasText: 'VNC destacar' }).locator('.tab-detach').click();
     const child = await opened; await child.waitForSelector('.graphic-mount canvas');
     assert.equal(await page.locator('#panes .graphic-mount').count(), 0, 'o painel VNC saiu da janela principal');
     assert.ok(await page.locator('#dock-all').isVisible(), 'botão "Trazer janelas" aparece');
@@ -47,7 +47,7 @@ const root = path.resolve(__dirname, '..');
 
     // Destaca o terminal e fecha a janela pelo X: a sessão volta (não é encerrada).
     const opened2 = app.waitForEvent('window');
-    await page.locator('#tabs .tab', { hasText: /PowerShell|Terminal|cmd/i }).first().locator('.tab-detach').click();
+    await page.locator('#tabs .tab', { hasText: /PowerShell|Terminal|cmd/i }).first().hover(); await page.locator('#tabs .tab', { hasText: /PowerShell|Terminal|cmd/i }).first().locator('.tab-detach').click();
     const child2 = await opened2; await child2.waitForSelector('.xterm');
     await child2.close();
     await page.waitForFunction(() => document.querySelectorAll('#panes .xterm').length === 1 && document.querySelectorAll('#tabs .tab').length === 2);

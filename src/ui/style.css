@@ -325,13 +325,14 @@ button.small.danger { background: var(--danger-bg); color: var(--danger); }
 .section-title { margin: 0 4px 8px; }
 .import-actions { gap: 8px; margin-bottom: 8px; }
 .tabbar { height: 32px; min-height: 32px; padding-left: 4px; align-items: center; gap: 4px; overflow: hidden; }
-#tabs { flex: 1 0 100px; min-width: 100px; padding-top: 3px; }
-#tabs .tab { height: 28px; min-width: 100px; padding: 0 4px 0 10px; color: var(--muted); border-bottom: 2px solid transparent; border-radius: 0; background: none; box-shadow: none; transition: color .12s, border-color .12s; }
+/* As abas têm prioridade de espaço; o que não cabe da barra vai para o menu ⋯. */
+#tabs { flex: 1 1 auto; min-width: 120px; padding-top: 3px; }
+#tabs .tab { height: 28px; min-width: 130px; padding: 0 4px 0 10px; color: var(--muted); border-bottom: 2px solid transparent; border-radius: 0; background: none; box-shadow: none; transition: color .12s, border-color .12s; }
 #tabs .tab:hover { color: var(--text); background: var(--hover); border-radius: 8px 8px 0 0; }
 #tabs .tab.active { color: var(--accent); border-bottom-color: var(--accent); background: none; box-shadow: none; font-weight: 600; }
 #add-tab { width: 24px; height: 24px; flex-shrink: 0; }
 .workspace-toolbar { height: 28px; min-height: 28px; padding: 0 8px 0 12px; }
-.tabbar > .workspace-toolbar { flex: 0 1 auto; min-width: 0; border: 0; gap: 8px; padding: 0 4px; }
+.tabbar > .workspace-toolbar { flex: 0 10 auto; min-width: 0; border: 0; gap: 8px; padding: 0 4px; }
 .tabbar .toolbar-actions { flex-shrink: 1; min-width: 0; overflow: hidden; }
 #toolbar-more { flex-shrink: 0; width: 28px; padding: 0; font-weight: 700; }
 .tabbar #session-label { max-width: 120px; font-size: 11px; }
@@ -386,7 +387,12 @@ body.no-sessions .workspace-toolbar { display: none !important; }
 body.popout-window { margin: 0; height: 100vh; overflow: hidden; background: var(--terminal); display: block; }
 .popout-host { position: fixed; inset: 0; display: grid; }
 .popout-host > .pane { display: block !important; min-height: 0; }
-.tab .tab-detach { opacity: .55; }
+/* Botão de janela separada só na aba ativa ou sob o mouse, para as abas não ficarem espremidas. */
+.tab .tab-detach { display: none; width: 22px; height: 22px; padding: 0; }
+.tab:hover .tab-detach, .tab.active .tab-detach { display: inline-flex; align-items: center; justify-content: center; }
+.panes-empty { position: absolute; inset: 0; background: var(--bg); display: flex; flex-direction: column; gap: 12px; align-items: center; justify-content: center; color: var(--muted); font-size: 14px; }
+.panes-empty[hidden] { display: none !important; }
+.panes-empty button { height: 32px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: 8px; }
 .tab:hover .tab-detach, .tab.active .tab-detach { opacity: 1; }
 
 /* Sessão Link: barra fixa no topo (não flutua sobre a página) e a página embaixo. */

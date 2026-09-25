@@ -264,20 +264,27 @@ async function openSession(profile) {
     const terminal = new Terminal({ fontFamily: 'Cascadia Code, Consolas, monospace', fontSize: state.config.settings.fontSize, scrollback: state.config.settings.scrollback, cursorBlink: true, theme: theme(), allowProposedApi: false });
     item.terminal = terminal; item.fit = new FitAddon(); item.search = new SearchAddon(); terminal.loadAddon(item.fit); terminal.loadAddon(item.search); terminal.open(mount);
     terminal.loadAddon(new WebLinksAddon((_, uri) => safe(() => call('links:open', uri))())); extras.attach(item);
-    terminal.onData(data => extras.input(item, data));
+    // Teclas digitadas enquanto o texto a colar ainda está sendo lido esperam e seguem depois dele, na ordem.
+    const typedDuringPaste = [];
+    terminal.onData(data => { if (item.pastePending && !item.injectingPaste) typedDuringPaste.push(data); else extras.input(item, data); });
     terminal.onResize(safe(size => call('terminal:resize', item.id, size.cols, size.rows)));
     // Copiar/colar como o Windows Terminal e o PuTTY: Ctrl+V, Ctrl+Shift+V e Shift+Insert colam; Ctrl+C com
     // texto selecionado copia (sem seleção continua sendo o Ctrl+C que interrompe o comando); Ctrl+Shift+C e
     // Ctrl+Insert copiam. preventDefault evita a colagem nativa do navegador em dobro.
-    const copySelection = () => { const text = terminal.getSelection(); if (!text) return false; safe(() => call('clipboard:write', text))(); terminal.clearSelection(); return true; };
-    const pasteClipboard = () => safe(async () => paste(item, await call('clipboard:read')))();
+    const copySelection = () => { const text = terminal.getSelection(); if (!text) return false; safe(() => call('clipboard:write', text))(); terminal.clearSelection(); toast(`Copiado (${text.length} caracteres). Clique direito sem seleção cola.`); return true; };
+    // Copiar e colar pelo MESMO caminho (processo principal, em ordem): copiar no terminal e colar logo em seguida
+    // não pega mais o texto antigo (antes a cópia ia por um caminho e o Ctrl+V lia por outro, e às vezes passava na frente).
+    const pasteClipboard = () => {
+      if (item.pastePending) return;
+      item.pastePending = call('clipboard:read').then(text => paste(item, text)).catch(error => toast(error.message))
+        .finally(() => { item.pastePending = null; for (const data of typedDuringPaste.splice(0)) extras.input(item, data); });
+    };
     terminal.attachCustomKeyEventHandler(event => {
       if (event.type !== 'keydown') return true;
       const ctrl = event.ctrlKey && !event.altKey && !event.metaKey;
-      // Colar pelo teclado segue o caminho nativo (evento paste, tratado abaixo), como o terminal do VS Code:
-      // o texto entra na ordem das teclas. Ler o clipboard pelo processo principal era assíncrono e um Enter
-      // digitado logo depois chegava ao shell antes do texto colado.
-      if ((ctrl && event.code === 'KeyV') || (event.shiftKey && !event.ctrlKey && !event.altKey && event.code === 'Insert')) return false;
+      // Ctrl+V / Ctrl+Shift+V / Shift+Insert: lê o clipboard pelo processo principal (mesmo caminho da cópia) e
+      // segura as teclas digitadas até o texto entrar, para nada passar na frente dele.
+      if ((ctrl && event.code === 'KeyV') || (event.shiftKey && !event.ctrlKey && !event.altKey && event.code === 'Insert')) { event.preventDefault(); if (!event.repeat) pasteClipboard(); return false; }
       if (ctrl && event.shiftKey && event.code === 'KeyC') { event.preventDefault(); copySelection(); return false; }
       if ((ctrl && !event.shiftKey && event.code === 'KeyC' && terminal.hasSelection()) || (ctrl && !event.shiftKey && event.code === 'Insert')) { event.preventDefault(); copySelection(); return false; }
       if (extras.key(item, event)) return false;
@@ -679,13 +686,28 @@ async function openRdp(item, result) {
     item.ended = true; toast('RDP desconectado' + (info?.reason ? ': ' + info.reason() : '.')); renderTabs();
   }).catch(error => { item.ended = true; toast('RDP: ' + rdpErrorText(error)); renderTabs(); });
 }
+const REMOTE_PASTE = ['ssh', 'ssh-x11', 'telnet', 'serial', 'rlogin', 'rsh'], PASTE_LINE_DELAY_MS = 40;
 async function paste(item, text) {
   // Uma linha só com a quebra no fim (linha inteira copiada do terminal, Notepad++, Teams): cola sem a quebra
   // e sem perguntar, como o trimPaste do Windows Terminal.
   if (/^[^\r\n]*\r?\n$/.test(text || '')) text = text.replace(/\r?\n$/, '');
   if (!text) return;
-  if (/[\r\n]/.test(text) && !await form({ title: 'Colar várias linhas?', message: 'A colagem pode executar comandos. Confira o conteúdo antes de continuar.', fields: [{ name: 'preview', label: 'Conteúdo', type: 'textarea', value: text, wide: true }], accept: 'Colar conteúdo' }).then(answer => { if (!answer) return false; text = answer.preview; return true; })) return;
-  item.terminal.paste(text);
+  // Terminal em janela separada: a confirmação aparece nela (a da janela principal ficava escondida atrás).
+  if (/[\r\n]/.test(text) && item.popout && !item.popout.web) { if (!item.popout.confirm(`Colar ${text.split(/\r?\n/).length} linhas? A colagem pode executar comandos.\n\n${text.slice(0, 600)}`)) return; }
+  else if (/[\r\n]/.test(text) && !await form({ title: 'Colar várias linhas?', message: 'A colagem pode executar comandos. Confira o conteúdo antes de continuar.', fields: [{ name: 'preview', label: 'Conteúdo', type: 'textarea', value: text, wide: true }], accept: 'Colar conteúdo' }).then(answer => { if (!answer) return false; text = answer.preview; return true; })) return;
+  // Switch/roteador/serial: o equipamento tem buffer de entrada pequeno e descarta caracteres ou linhas quando o
+  // texto chega de uma vez — a causa clássica do "às vezes cola, às vezes não". Como o SecureCRT e o PuTTY,
+  // manda linha por linha, em pedaços, com uma pequena pausa. As teclas digitadas nesse meio esperam na fila.
+  if (REMOTE_PASTE.includes(item.profile?.type) && (text.length > 200 || /[\r\n]/.test(text))) {
+    const lines = text.replace(/\r\n?/g, '\n').split('\n');
+    for (let i = 0; i < lines.length && !item.ended; i++) {
+      const line = lines[i] + (i < lines.length - 1 ? '\r' : '');
+      for (let at = 0; at < line.length; at += 64) { extras.input(item, line.slice(at, at + 64)); await new Promise(r => setTimeout(r, 4)); }
+      if (i < lines.length - 1) await new Promise(r => setTimeout(r, PASTE_LINE_DELAY_MS));
+    }
+    return;
+  }
+  item.injectingPaste = true; try { item.terminal.paste(text); } finally { item.injectingPaste = false; }
 }
 async function closeSession(id, force = false) {
   const item = sessions.get(id); if (!item) return;
@@ -720,6 +742,9 @@ function popOut(item, at = null) {
   const host = doc.createElement('div'); host.id = 'panes'; host.className = 'popout-host'; doc.body.append(host);
   host.append(doc.adoptNode(item.pane)); item.pane.hidden = false; item.popout = child;
   const refit = () => requestAnimationFrame(() => { item.fit?.fit(); item.rfb?._updateScale?.(); });
+  // A barra da sessão (lupa, tela cheia, colar…) aparece com o mouse no topo também nesta janela.
+  doc.addEventListener('mousemove', event => item.pane.classList.toggle('show-bar', event.clientY < 48), true);
+  doc.addEventListener('mouseleave', () => item.pane.classList.remove('show-bar'));
   child.addEventListener('resize', refit); refit();
   // O noVNC "captura" o mouse com uma camada no documento principal e só a solta quando o botão é solto aqui;
   // soltando na janela separada, a camada ficava e a janela principal parava de aceitar cliques.
@@ -761,6 +786,10 @@ api.on('web:docked', ({ session, url, zoom }) => {
 });
 const dockAll = () => { for (const item of sessions.values()) dockBack(item); window.focus(); };
 window.addEventListener('beforeunload', () => { for (const item of sessions.values()) try { item.popout?.close(); } catch { /* ignora */ } });
+// Aviso na área das sessões quando todas estão em janelas separadas (antes ficava só um fundo vazio).
+const panesEmpty = elem('div', '', 'panes-empty'); panesEmpty.hidden = true;
+panesEmpty.append(elem('div', 'As sessões abertas estão em janelas separadas.'), button('⧈ Trazer todas de volta', () => dockAll()));
+$('panes').after(panesEmpty); // fora de #panes: a regra #panes:empty esconde a área quando não há sessões
 const dockButton = button('⧈ Trazer janelas', dockAll); dockButton.id = 'dock-all'; dockButton.title = 'Trazer de volta todas as sessões abertas em janelas separadas'; dockButton.hidden = true;
 document.querySelector('.toolbar-actions').prepend(dockButton);
 
@@ -809,6 +838,7 @@ function layout() {
   const ids = [...sessions.values()].filter(item => !item.popout).map(item => item.id); const selected = split ? [activeId, ...ids.filter(id => id !== activeId)].filter(id => ids.includes(id)).slice(0, 4) : [activeId];
   $('panes').classList.toggle('split', split && sessions.size > 1); $('panes').classList.toggle('many', split && selected.length > 2);
   for (const item of sessions.values()) if (!item.popout) item.pane.hidden = !selected.includes(item.id);
+  const empty = document.querySelector('.panes-empty'); if (empty) empty.hidden = !(sessions.size && !ids.length);
   requestAnimationFrame(() => { for (const item of sessions.values()) if (!item.pane.hidden) item.fit?.fit(); updateNativeBounds(); });
   syncFiles(); updateToolbarMore();
 }

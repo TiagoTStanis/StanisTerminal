@@ -81,7 +81,7 @@ function labSite(IDLE_MS) {
 
     // Janela separada: a aba de link vai para uma janela própria, continua logada (mesmo perfil), e volta ao fechar.
     const opened = app.waitForEvent('window');
-    await page.locator('#tabs .tab', { hasText: 'Firewall lab' }).locator('.tab-detach').click();
+    await page.locator('#tabs .tab', { hasText: 'Firewall lab' }).hover(); await page.locator('#tabs .tab', { hasText: 'Firewall lab' }).locator('.tab-detach').click();
     const popWin = await opened; await popWin.waitForLoadState();
     await popWin.waitForFunction(() => /LOGADO/.test(document.title), null, { timeout: 15000 });
     assert.equal(await page.locator('.pane webview').count(), 1, 'a página saiu da aba (fica só a de largura)');
@@ -91,7 +91,7 @@ function labSite(IDLE_MS) {
     await page.waitForFunction(() => [...document.querySelectorAll('.pane webview')].some(v => { try { return /LOGADO/.test(v.getTitle()); } catch { return false; } }), null, { timeout: 15000 });
     // "Trazer janelas" também devolve.
     const opened2 = app.waitForEvent('window');
-    await page.locator('#tabs .tab', { hasText: 'Firewall lab' }).locator('.tab-detach').click();
+    await page.locator('#tabs .tab', { hasText: 'Firewall lab' }).hover(); await page.locator('#tabs .tab', { hasText: 'Firewall lab' }).locator('.tab-detach').click();
     await opened2; await page.click('#dock-all');
     await page.waitForFunction(() => document.querySelectorAll('.pane webview').length === 2 && document.querySelector('#dock-all').hidden, null, { timeout: 10000 });
     console.log('PASS: aba de link em janela separada, ainda logada; volta ao fechar a janela e pelo "Trazer janelas".');

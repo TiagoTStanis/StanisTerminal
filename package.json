@@ -1,6 +1,6 @@
 {
   "name": "stanis-terminal",
-  "version": "1.18.0",
+  "version": "1.18.1",
   "description": "Terminal local para Windows, sem IA, com sessões e ferramentas de infraestrutura.",
   "main": "src/main.cjs",
   "author": "Tiago Torres Stanis",
@@ -25,7 +25,8 @@
     "test:lock": "node tests/lock-ui.cjs",
     "test:tightui": "node --openssl-legacy-provider tests/tightvnc-ui.cjs",
     "test:windows": "node --openssl-legacy-provider tests/popout-ui.cjs",
-    "test:web": "node tests/weblink-ui.cjs"
+    "test:web": "node tests/weblink-ui.cjs",
+    "test:paste": "node tests/paste-ui.cjs"
   },
   "dependencies": {
     "@novnc/novnc": "1.7.0",
