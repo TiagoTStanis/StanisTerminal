@@ -170,7 +170,7 @@ function openWebSession(profile) {
     fullscreenButton(item.pane)
   );
   bar.children[0].title = 'Voltar'; bar.children[1].title = 'Avançar'; bar.children[2].title = 'Recarregar'; bar.children[5].title = 'Abrir no navegador padrão (fora do app)';
-  item.pane.append(bar); setKeepAlive(profile.keepAlive !== false);
+  item.pane.append(bar); item.setKeepAlive = setKeepAlive; setKeepAlive(profile.keepAlive !== false);
   item.address = address;
   try { const saved = localStorage.getItem('web-zoom:' + profile.id); item.webZoom = saved ? (/^(auto|w\d+)$/.test(saved) ? saved : Number(saved) || 'auto') : 'auto'; } catch { item.webZoom = 'auto'; }
   attachWebview(item, document, profile.url); applyWebZoom(item);
@@ -706,8 +706,7 @@ async function closeSession(id, force = false) {
 function popOut(item, at = null) {
   if (item.popout) { item.popout.focus(); return; }
   if (['x11', 'xdmcp'].includes(item.profile.type)) throw new Error('Sessões X11 já abrem em janela própria.');
-  // O navegador embutido (<webview>) não funciona em janela filha: a aba de Link usa o botão 🌐 para abrir fora do app.
-  if (item.web) throw new Error('Abas de link não vão para janela separada: use 🌐 Navegador para abrir a página fora do app.');
+  if (item.web) return popOutWeb(item, at);
   const box = item.pane.getBoundingClientRect(), width = Math.max(640, Math.round(box.width)), height = Math.max(420, Math.round(box.height));
   const place = at ? `,left=${Math.round(at.x - 60)},top=${Math.round(at.y - 20)}` : '';
   const child = window.open('about:blank', 'stanis-popout-' + String(item.id).replace(/[^\w-]/g, ''), `width=${width},height=${height}${place}`);
@@ -739,6 +738,27 @@ function dockBack(item, close = true) {
   if (close) try { child.close(); } catch { /* já fechada */ }
   activeId = item.id; layout(); requestAnimationFrame(() => { item.fit?.fit(); item.rfb?._updateScale?.(); item.terminal?.focus(); });
 }
+// Aba de Link: o <webview> não funciona na janela filha, então o processo principal abre uma janela própria no
+// mesmo perfil (continua logada), com lupa, "manter ativa" e menu. Ao fechar, a página volta para a aba (web:docked).
+async function popOutWeb(item, at) {
+  let url = item.profile.url; try { url = item.webview?.getURL() || url; } catch { /* usa o endereço salvo */ }
+  const box = item.pane.getBoundingClientRect();
+  await call('web:popout', { session: item.id, url, title: item.name, zoom: item.webZoom, keepAlive: item.keepAlive, minutes: item.profile.keepAliveMinutes, at, width: Math.round(box.width), height: Math.round(box.height) });
+  try { item.webview?.remove(); } catch { /* já descartado */ }
+  item.webview = null; item.webReady = false; clearInterval(item.keepTimer);
+  item.popout = { web: true, focus: () => call('web:focus', item.id), close: () => call('web:dock', item.id).catch(() => {}) };
+  item.pane.hidden = true;
+  if (activeId === item.id) activeId = [...sessions.values()].find(other => !other.popout)?.id ?? activeId;
+  layout();
+}
+api.on('web:docked', ({ session, url, zoom }) => {
+  const item = sessions.get(session); if (!item || item.ended || item.closing) return;
+  item.popout = null;
+  if (zoom !== undefined && zoom !== null) setWebZoom(item, zoom);
+  attachWebview(item, document, /^https?:\/\//i.test(url || '') ? url : item.profile.url);
+  item.setKeepAlive?.(item.keepAlive);
+  activeId = item.id; layout(); window.focus();
+});
 const dockAll = () => { for (const item of sessions.values()) dockBack(item); window.focus(); };
 window.addEventListener('beforeunload', () => { for (const item of sessions.values()) try { item.popout?.close(); } catch { /* ignora */ } });
 const dockButton = button('⧈ Trazer janelas', dockAll); dockButton.id = 'dock-all'; dockButton.title = 'Trazer de volta todas as sessões abertas em janelas separadas'; dockButton.hidden = true;
@@ -755,7 +775,7 @@ function renderTabs() {
     tab.dataset.id = String(item.id);
     tab.ondblclick = event => { if (event.target.closest('button')) return; activeId = item.id; setFocusMode(!document.body.classList.contains('focus-mode')); };
     tab.append(elem('span', (item.ended ? '○ ' : '● ') + (item.popout ? '⧉ ' : '') + item.name));
-    if (!['x11', 'xdmcp', 'web'].includes(item.profile.type)) {
+    if (!['x11', 'xdmcp'].includes(item.profile.type)) {
       const detach = button(item.popout ? '⧈' : '⧉', event => { event.stopPropagation(); return item.popout ? dockBack(item) : popOut(item); }, 'tab-detach');
       detach.title = item.popout ? 'Trazer de volta para as abas' : 'Abrir em janela separada (ou arraste a aba para fora)'; tab.append(detach);
       // Arrastar a aba para fora da janela do app abre a sessão numa janela separada, onde foi solta.

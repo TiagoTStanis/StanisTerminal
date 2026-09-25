@@ -522,8 +522,80 @@ app.whenReady().then(() => {
 });
 // Certificado próprio (comum em páginas de switch, firewall, iDRAC…): pergunta uma vez e lembra por host +
 // impressão digital, como a chave de um servidor SSH. Um certificado diferente depois pergunta de novo.
+// ---------- Aba de Link em janela separada ----------
+// O <webview> não funciona na janela filha usada pelas outras sessões, então a aba de Link vai para uma janela
+// própria, no mesmo perfil isolado (continua logada), com a mesma lupa e o mesmo "manter ativa". Fechar a janela
+// (ou "Trazer de volta") devolve a página para a aba, no endereço em que estava.
+const webPopouts = new Map(); // sessão → { win, mode, timer, silent }
+const webPopoutIds = new Set(); // webContents dessas janelas (para o certificado próprio)
+function webZoomFactor(win, mode) {
+  const width = win.getContentBounds().width || 1200;
+  const factor = mode === 'auto' ? Math.min(1, width / 1280) : typeof mode === 'string' ? width / Number(mode.slice(1)) : Number(mode) || 1;
+  return Math.max(0.25, Math.min(3, factor));
+}
+function openWebPopout(options) {
+  const sessionId = text(options?.session, 120), url = text(options?.url, 2048);
+  if (!/^https?:\/\//i.test(url)) throw new Error('Endereço inválido.');
+  if (webPopouts.has(sessionId)) { webPopouts.get(sessionId).win.focus(); return true; }
+  const mode = options.zoom === 'auto' || /^w\d{3,4}$/.test(options.zoom) ? options.zoom : Math.max(0.25, Math.min(3, Number(options.zoom) || 1));
+  const at = options.at && Number.isFinite(options.at.x) && Number.isFinite(options.at.y) ? { x: Math.round(options.at.x - 60), y: Math.round(options.at.y - 20) } : {};
+  const win = new BrowserWindow({ width: Math.max(800, Number(options.width) || 1200), height: Math.max(560, Number(options.height) || 800), ...at, title: text(options.title || 'Link', 200), icon: path.join(__dirname, 'ui/icon.ico'), backgroundColor: '#ffffff',
+    webPreferences: { partition: WEB_PARTITION, sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, spellcheck: false } });
+  const entry = { win, mode, timer: null, silent: false, url };
+  webPopouts.set(sessionId, entry); webPopoutIds.add(win.webContents.id);
+  const contents = win.webContents, web = link => /^https?:\/\//i.test(link);
+  const apply = () => { try { contents.setZoomFactor(webZoomFactor(win, entry.mode)); } catch { /* carregando */ } };
+  const setMode = next => { entry.mode = typeof next === 'number' ? Math.round(Math.max(0.25, Math.min(3, next)) * 100) / 100 : next; apply(); buildMenu(); };
+  const step = direction => direction === 0 ? setMode('auto') : setMode(webZoomFactor(win, entry.mode) * (direction > 0 ? 1.1 : 1 / 1.1));
+  const buildMenu = () => {
+    const zoomItem = (value, label) => ({ label, type: 'radio', checked: entry.mode === value, click: () => setMode(value) });
+    win.setMenu(Menu.buildFromTemplate([
+      { label: '← Voltar', click: () => contents.navigationHistory.canGoBack() && contents.navigationHistory.goBack() },
+      { label: '→ Avançar', click: () => contents.navigationHistory.canGoForward() && contents.navigationHistory.goForward() },
+      { label: '↻ Recarregar', accelerator: 'F5', click: () => contents.reload() },
+      { label: `🔍 Zoom (${Math.round(webZoomFactor(win, entry.mode) * 100)}%)`, submenu: [
+        zoomItem('auto', 'Automático (layout de computador, mín. 1280 px)'), { type: 'separator' },
+        zoomItem('w1366', 'Como uma tela de 1366 px'), zoomItem('w1600', 'Como uma tela de 1600 px'), zoomItem('w1920', 'Como uma tela de 1920 px (Full HD)'), { type: 'separator' },
+        ...[0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5].map(z => zoomItem(z, z === 1 ? '100% (tamanho real)' : `${Math.round(z * 100)}%`)),
+      ] },
+      { label: '🌐 Navegador', click: () => { const current = contents.getURL(); if (web(current)) shell.openExternal(current); } },
+      { label: '⧈ Trazer de volta para o Stanis Terminal', click: () => win.close() },
+    ]));
+  };
+  buildMenu();
+  contents.setWindowOpenHandler(({ url: link }) => { if (web(link)) contents.loadURL(link); return { action: 'deny' }; });
+  contents.on('will-navigate', (event, link) => { if (!web(link)) event.preventDefault(); });
+  contents.on('zoom-changed', (_, direction) => step(direction === 'in' ? 1 : -1));
+  contents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || !input.control || input.alt || input.meta) return;
+    const direction = ['=', '+'].includes(input.key) ? 1 : input.key === '-' ? -1 : input.key === '0' ? 0 : null;
+    if (direction !== null) { event.preventDefault(); step(direction); }
+  });
+  contents.on('did-finish-load', apply); contents.on('did-navigate', apply); win.on('resize', () => { apply(); buildMenu(); });
+  contents.on('page-title-updated', (event, title) => { event.preventDefault(); win.setTitle(`${title} — ${text(options.title || 'Link', 200)}`); });
+  // Manter ativa: o mesmo sinal da aba (movimento de mouse real + requisição à própria página com o login).
+  if (options.keepAlive) entry.timer = setInterval(() => {
+    if (contents.isDestroyed()) return;
+    const x = 5 + Math.floor(Math.random() * 20), y = 5 + Math.floor(Math.random() * 20);
+    contents.sendInputEvent({ type: 'mouseMove', x, y }); contents.sendInputEvent({ type: 'mouseMove', x: x + 1, y: y + 1 });
+    contents.executeJavaScript("fetch(location.href, { credentials: 'include', cache: 'no-store' }).then(() => true, () => false)", false).catch(() => {});
+  }, Math.max(1, Math.min(60, Number(options.minutes) || 4)) * 60000);
+  win.on('close', () => { try { entry.url = contents.getURL() || entry.url; } catch { /* já fechando */ } });
+  win.on('closed', () => {
+    clearInterval(entry.timer); webPopouts.delete(sessionId); webPopoutIds.delete(entry.contentsId);
+    if (!entry.silent) emit('web:docked', { session: sessionId, url: web(entry.url) ? entry.url : url, zoom: entry.mode });
+  });
+  entry.contentsId = contents.id;
+  win.loadURL(url);
+  return true;
+}
+handle('web:popout', options => openWebPopout(options));
+handle('web:dock', id => { webPopouts.get(text(id, 120))?.win.close(); return true; });
+handle('web:focus', id => { const entry = webPopouts.get(text(id, 120)); if (entry) { if (entry.win.isMinimized()) entry.win.restore(); entry.win.focus(); } return !!entry; });
+handle('web:closePopout', id => { const entry = webPopouts.get(text(id, 120)); if (entry) { entry.silent = true; entry.win.close(); } return true; });
+
 app.on('certificate-error', (event, contents, url, error, certificate, callback) => {
-  if (contents.getType() !== 'webview') return callback(false);
+  if (contents.getType() !== 'webview' && !webPopoutIds.has(contents.id)) return callback(false);
   event.preventDefault();
   let hostPort; try { hostPort = new URL(url).host; } catch { return callback(false); }
   const trusted = config.value.trustedWebCerts || {};
