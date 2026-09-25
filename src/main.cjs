@@ -435,8 +435,9 @@ app.whenReady().then(async () => {
       if (url.host !== 'app' || !inside(root, filename)) return new Response('Forbidden', { status: 403 });
       return electronNet.fetch(pathToFileURL(filename).toString());
     });
-    session.defaultSession.setPermissionRequestHandler((_, __, callback) => callback(false));
-    session.defaultSession.setPermissionCheckHandler(() => false);
+    // Só a tela cheia (botão das sessões gráficas) é liberada; o resto das permissões do navegador fica negado.
+    session.defaultSession.setPermissionRequestHandler((_, permission, callback) => callback(permission === 'fullscreen'));
+    session.defaultSession.setPermissionCheckHandler((_, permission) => permission === 'fullscreen');
     session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (details, callback) => {
       // Única exceção: o proxy RDCleanPath local (WebSocket -> TLS -> TCP) que o cliente RDP em
       // WASM usa para alcançar o servidor de verdade — nunca sai da máquina, porta é dinâmica.

@@ -190,6 +190,25 @@ async function openSession(profile) {
         close() { this.readyState = 3; safe(() => call('graphics:close', item.id))(); }
       };
       item.channel = channel; item.rfb = new RFB(item.mount, channel); item.rfb.showDotCursor = true;
+      // Teclas em rajada (digitação muito rápida, teclas sobrepostas) saem com um intervalo mínimo: o TightVNC
+      // trata caracteres e teclas especiais (Enter, setas) por caminhos diferentes e, com as mensagens coladas,
+      // trocava a ordem delas. Digitação normal não sente diferença (só espera quem chega junto).
+      const KEY_GAP_MS = 30, rawSendKey = item.rfb.sendKey.bind(item.rfb), keyQueue = [];
+      let keyTimer = null, lastKeyAt = 0;
+      const flushKeys = () => {
+        keyTimer = null; const next = keyQueue.shift(); if (!next) return;
+        rawSendKey(...next); lastKeyAt = performance.now();
+        // Depois de Ctrl/Alt/Shift/Win o servidor precisa de um respiro maior (senão um "d" logo após soltar o
+        // Ctrl do Ctrl+V virava Ctrl+D).
+        const modifier = next[0] >= 0xffe1 && next[0] <= 0xffee;
+        if (keyQueue.length) keyTimer = setTimeout(flushKeys, modifier ? KEY_GAP_MS * 2 : KEY_GAP_MS);
+        else if (modifier) lastKeyAt += KEY_GAP_MS;
+      };
+      item.rfb.sendKey = (keysym, code, down) => {
+        if (down === undefined) { item.rfb.sendKey(keysym, code, true); item.rfb.sendKey(keysym, code, false); return; }
+        keyQueue.push([keysym, code, down]);
+        if (!keyTimer) keyTimer = setTimeout(flushKeys, Math.max(0, KEY_GAP_MS - (performance.now() - lastKeyAt)));
+      };
       // Modo de exibição, lembrado por sessão: "ajustar" encolhe a tela remota inteira para caber no painel;
       // "real" mostra 100% com barras de rolagem (útil com duas telas) e não pede ao servidor para
       // redimensionar a sessão, para não reorganizar a área de trabalho remota.
@@ -238,6 +257,8 @@ async function openSession(profile) {
       };
       const sendClipboard = () => safe(() => syncClipboard(true))();
       item.clipboardTimer = setInterval(() => { if (activeId === item.id && document.hasFocus()) safe(syncClipboard)(); }, 1000);
+      // Voltou para o app depois de copiar em outro programa: manda já, antes de dar tempo de apertar Ctrl+V.
+      window.addEventListener('focus', () => { if (activeId === item.id && !item.ended) safe(syncClipboard)(); });
       // Ctrl+V / Shift+Insert: usa o colar nativo do Chromium (o evento paste chega na ordem das teclas e já
       // traz o texto), manda o texto ao servidor e só então a tecla de colar. As teclas digitadas nesse meio
       // (um Enter logo depois, por exemplo) esperam numa fila e seguem na ordem — antes, o Enter podia chegar
@@ -253,15 +274,34 @@ async function openSession(profile) {
       const pasteText = text => {
         clearTimeout(waiting); waiting = null; const key = pasteKey; pasteKey = null;
         pasting = (async () => {
-          if (text && text !== lastText) { lastText = text; item.rfb?.clipboardPasteFrom(toLatin1(text)); await new Promise(r => setTimeout(r, 150)); }
+          if (text && text !== lastText) { lastText = text; item.rfb?.clipboardPasteFrom(toLatin1(text)); await new Promise(r => setTimeout(r, 400)); } // o TightVNC leva alguns centésimos para pôr o texto no clipboard do Windows remoto
           if (key === 'Insert') { item.rfb?.sendKey(0xff63, 'Insert', true); item.rfb?.sendKey(0xff63, 'Insert', false); return; }
           const wrap = !serverCtrl; if (wrap) item.rfb?.sendKey(0xffe3, 'ControlLeft', true);
           item.rfb?.sendKey(0x76, 'KeyV', true); item.rfb?.sendKey(0x76, 'KeyV', false);
           if (wrap) item.rfb?.sendKey(0xffe3, 'ControlLeft', false);
         })().catch(error => toast(error.message)).finally(() => { pasting = null; replay(); });
       };
+      // Shift: o TightVNC (e outros servidores que recebem caracteres/keysyms) aperta e solta o Shift sozinho
+      // para gerar "!", "A", "?"… Mandar também o nosso Shift embaralhava as duas coisas lá: o 1 virava !, o
+      // ! virava 1, uma letra digitada antes do Shift saía maiúscula. Então o Shift só é enviado quando serve
+      // de verdade (Shift+seta, Shift+clique, Ctrl+Shift+…); para caractere vai só o caractere.
+      let shiftHeld = false, shiftSent = false;
+      const sendShift = () => { if (shiftHeld && !shiftSent) { shiftSent = true; item.rfb?.sendKey(0xffe1, 'ShiftLeft', true); } };
+      const releaseShift = () => { if (shiftSent) item.rfb?.sendKey(0xffe1, 'ShiftLeft', false); shiftHeld = shiftSent = false; };
+      const onShift = event => {
+        if (event.key === 'Shift') {
+          event.preventDefault(); event.stopImmediatePropagation();
+          if (event.type === 'keydown') shiftHeld = true; else releaseShift();
+          return true;
+        }
+        if (event.type === 'keydown' && shiftHeld && !(event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey)) sendShift();
+        return false;
+      };
+      item.mount.addEventListener('mousedown', sendShift, true);
+      window.addEventListener('blur', releaseShift);
       const onKey = event => {
         if (replaying) return;
+        if (onShift(event)) return;
         // A tecla de colar já foi enviada por pasteText: o keyup dela não vai para o servidor.
         if (event.type === 'keyup' && event.code === 'KeyV' && swallowV) { swallowV = false; event.preventDefault(); event.stopImmediatePropagation(); return; }
         if (pasting || waiting) {
@@ -438,7 +478,28 @@ async function openRdp(item, result) {
   const size = item.rdpSession.desktopSize(); canvas.width = size.width; canvas.height = size.height; fit();
   canvas.focus(); toast('RDP conectado.');
   const runInput = (build) => { if (!item.rdpSession) return; const tx = new rdp.InputTransaction(); build(tx); safe(() => item.rdpSession.applyInputs(tx))(); };
-  const sendKey = (event, down) => { const code = scancode(event); if (code === undefined) return; runInput(tx => tx.addEvent(down ? rdp.DeviceEvent.keyPressed(code) : rdp.DeviceEvent.keyReleased(code))); };
+  // Caps/Num/Scroll Lock, como o mstsc: ao entrar na sessão (conexão, clique, volta do Alt+Tab) manda o
+  // ESTADO das travas do teclado local (TS_SYNC_EVENT) antes da primeira tecla; depois as teclas de trava
+  // seguem como teclas normais e os dois lados alternam juntos. Sem isso o Caps ficava invertido e o
+  // teclado numérico virava setas (NumLock desligado no servidor), como no RemoteApp.
+  let needSync = true;
+  const syncLocks = event => {
+    if (!needSync || !item.rdpSession || !event.getModifierState) return false;
+    needSync = false;
+    const state = name => event.getModifierState(name) !== (event.type === 'keydown' && event.code === name); // estado antes desta tecla
+    safe(() => item.rdpSession.synchronizeLockKeys(state('ScrollLock'), state('NumLock'), state('CapsLock'), false))();
+    return true;
+  };
+  const sendKey = (event, down) => {
+    if (down) syncLocks(event);
+    const code = scancode(event); if (code === undefined) return;
+    runInput(tx => tx.addEvent(down ? rdp.DeviceEvent.keyPressed(code) : rdp.DeviceEvent.keyReleased(code)));
+  };
+  // Ao sair da janela ou da tela (Alt+Tab, clique fora) solta tudo no servidor, como o mstsc: um Shift que
+  // ficasse "apertado" lá fazia o 1 virar !. Na volta, sincroniza as travas de novo.
+  const releaseAll = () => { needSync = true; safe(() => item.rdpSession?.releaseAllInputs())(); };
+  canvas.addEventListener('blur', releaseAll); window.addEventListener('blur', releaseAll);
+  canvas.addEventListener('mousedown', syncLocks);
   // Ctrl+V / Shift+Insert: anuncia primeiro o texto copiado no Windows e só então manda a tecla; as teclas
   // digitadas nesse meio esperam na fila e seguem na ordem (senão o servidor colava o clipboard antigo).
   let rdpPasting = null; const rdpQueue = [];
@@ -555,7 +616,7 @@ function updateNativeBounds() {
 // Rsh —, onde switches e roteadores mandam texto sem cor; os shells locais ficam como o Windows entrega.
 function highlightOutput(item, data) {
   if (!state.config.settings.highlightErrors || item.profile?.type === 'local') return data;
-  return highlight(data, state.config.settings.highlightSet);
+  return highlight(data, state.config.settings.highlightSet, item.highlightState ??= {});
 }
 api.on('terminal:data', ({ id, data }) => { const item = sessions.get(id); if (item?.terminal) { item.terminal.write(highlightOutput(item, data)); extras?.output(item, data); } });
 api.on('terminal:exit', ({ id, code }) => { const item = sessions.get(id); if (item) { item.ended = true; item.terminal.writeln(`\r\n\x1b[90m[Sessão encerrada: ${code}]\x1b[0m`); renderTabs(); } });

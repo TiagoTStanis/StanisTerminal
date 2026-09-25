@@ -36,3 +36,20 @@ test('cores e escapes que o servidor já mandou ficam intactos', () => {
   assert.deepEqual(out.match(/\x1b\[01;34m|\x1b\[0m|\x1b\]0;titulo up\x07|\x1b\[2K|\x1b\[1G/g), ['\x1b[01;34m', '\x1b[0m', '\x1b]0;titulo up\x07', '\x1b[2K', '\x1b[1G']);
   assert.deepEqual(colored(out).map(([, t]) => t), ['down', 'up'], '"up" dentro do título (OSC) não é tocado');
 });
+
+test('prompt de equipamento/shell em negrito e comando digitado em destaque, sem alterar o texto', () => {
+  const state = {};
+  const pieces = ['\r\nSW-CORE>', 'e', 'n', '\r\n', 'SW-CORE#', 'conf t\r\n', 'SW-CORE(config-if)#shutdown\r\n', '<HUAWEI-01>display version\r\n', '[~HUAWEI-01]quit\r\n', 'tiago@srv01:~/logs$ ', 'ls -la\r\n', 'total 12\r\n'];
+  const out = pieces.map(p => highlight(p, 'network', state)).join('');
+  assert.equal(plain(out), pieces.join(''), 'o texto em si não pode mudar');
+  const bold = [...out.matchAll(/\x1b\[1;3\dm([^\x1b]*)/g)].map(m => m[1]);
+  for (const prompt of ['SW-CORE', '>', '#', '(config-if)', '<HUAWEI-01>', '[~HUAWEI-01]', 'tiago@srv01', '~/logs']) assert.ok(bold.includes(prompt), `prompt "${prompt}" em negrito: ${JSON.stringify(bold)}`);
+  // O comando ecoado (letra a letra ou colado no prompt) fica em negrito até o Enter; a saída depois não.
+  for (const command of ['e', 'shutdown', 'display version', 'ls -la']) assert.ok(out.includes(`\x1b[1m${command}\x1b[22m`), `comando "${command}" em destaque`);
+  assert.ok(!out.includes('\x1b[1mtotal'));
+});
+
+test('linhas comuns que terminam em # ou > no meio do texto não viram prompt', () => {
+  const out = highlight('Building configuration...\r\nCurrent configuration : 1234 bytes\r\n! comentario > nada\r\n', 'network', {});
+  assert.doesNotMatch(out, /\x1b\[1;3\dm/);
+});

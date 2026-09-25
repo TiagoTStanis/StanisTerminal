@@ -46,12 +46,49 @@ function colorText(text, rules) {
   return result + text.slice(last);
 }
 
-export function highlight(data, set = 'network') {
+// ---------- Prompt e comando digitado ----------
+// Prompt no começo da linha, em negrito: equipamento de rede (SW-CORE> / SW-CORE# / SW(config-if)#),
+// Huawei/HP (<SW>, [SW], [~SW-GigabitEthernet0/0/1]) e shells Unix (usuario@host:/caminho$).
+// O modo privilegiado (#) fica laranja, o de usuário (>) verde e o "(config…)" amarelo.
+// Cores da paleta ANSI (verde, amarelo, azul, magenta): cada tema do app ajusta o tom, então ficam legíveis
+// no claro e no escuro. O comando digitado vai só em negrito, na cor normal do texto.
+const C = { host: '\x1b[1;32m', priv: '\x1b[1;33m', config: '\x1b[1;35m', path: '\x1b[1;34m', off: '\x1b[22;39m' };
+const COMMAND = '\x1b[1m', COMMAND_OFF = '\x1b[22m';
+const PROMPTS = [
+  // usuario@host:caminho$ ou #
+  { regex: /^([\w.-]+@[\w.-]+)(:)([^\s$#]*)([$#]) /, render: m => `${C.host}${m[1]}${C.off}${m[2]}${C.path}${m[3]}${C.off}${m[4] === '#' ? C.priv : ''}${m[4]}${C.off} ` },
+  // <Huawei> [Huawei] [~Huawei-GigabitEthernet0/0/1] — o comando vem colado no prompt.
+  { regex: /^(<[\w.\-/]{1,63}>|\[[~*]?[\w.\-/:]{1,80}\])/, render: m => `${C.host}${m[1]}${C.off}` },
+  // Cisco, Aruba, HP, Juniper, Mikrotik: HOST> HOST# HOST(config-if)# — também sem espaço antes do comando.
+  { regex: /^([A-Za-z][\w.\-/@]{0,62})(\((?:config|conf|vlan|cfg)[^)]{0,40}\))?([#>])/, render: m => `${m[3] === '#' ? C.priv : C.host}${m[1]}${C.off}${m[2] ? C.config + m[2] + C.off : ''}${m[3] === '#' ? C.priv : C.host}${m[3]}${C.off}` },
+];
+function matchPrompt(line) {
+  for (const prompt of PROMPTS) { const m = prompt.regex.exec(line); if (m) return [prompt.render(m), m[0].length]; }
+  return null;
+}
+
+// state (um objeto por sessão) lembra, entre um pedaço de saída e outro, se estamos no começo de uma linha e se
+// o cursor está depois de um prompt: o que o servidor ecoa dali em diante é o comando digitado, em destaque
+// até o Enter. Sem state, cada chamada começa no início de uma linha.
+export function highlight(data, set = 'network', state = null) {
   const rules = SETS[set] || SETS.network;
+  const st = state || {}; if (st.lineStart === undefined) st.lineStart = true;
   let result = '', last = 0;
+  const piece = text => {
+    let out = '';
+    for (const part of text.split(/([\r\n]+)/)) {
+      if (!part) continue;
+      if (/^[\r\n]+$/.test(part)) { st.command = false; st.lineStart = true; out += part; continue; }
+      let rest = part;
+      if (st.lineStart) { const prompt = matchPrompt(part); if (prompt) { out += prompt[0]; rest = part.slice(prompt[1]); st.command = true; } }
+      st.lineStart = false;
+      out += st.command ? (rest ? COMMAND + rest + COMMAND_OFF : '') : colorText(rest, rules);
+    }
+    return out;
+  };
   for (const escape of data.matchAll(ESCAPE)) {
-    result += colorText(data.slice(last, escape.index), rules) + escape[0];
+    result += piece(data.slice(last, escape.index)) + escape[0];
     last = escape.index + escape[0].length;
   }
-  return result + colorText(data.slice(last), rules);
+  return result + piece(data.slice(last));
 }

@@ -256,9 +256,12 @@ h2 { font-size: 16px; font-weight: 600; margin: 0; }
 .ctx-sep { height: 1px; background: var(--line); margin: 4px 2px; }
 
 /* ----- Sugestões ----- */
-.suggest { position: absolute; left: 8px; right: 8px; bottom: 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px; background: var(--panel); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: var(--shadow); z-index: 5; }
-.suggest .suggest-item { font: 12px Consolas, monospace; max-width: 100%; overflow: hidden; text-overflow: ellipsis; height: 24px; border: 1px solid var(--line); }
-.suggest small { color: var(--muted); margin-left: auto; }
+/* Sugestões do histórico: lista compacta no canto superior direito, longe da linha em que se digita. */
+.suggest { position: absolute; top: 10px; right: 20px; width: min(340px, 45%); display: flex; flex-direction: column; gap: 2px; padding: 6px; background: color-mix(in srgb, var(--panel) 92%, transparent); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: var(--shadow); z-index: 5; opacity: .92; }
+.suggest:hover { opacity: 1; }
+.suggest .suggest-item { font: 12px Consolas, monospace; width: 100%; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; height: 24px; padding: 0 8px; border: 0; border-radius: 5px; }
+.suggest .suggest-item:first-of-type { background: var(--accent-bg); }
+.suggest small { color: var(--muted); font-size: 10.5px; padding: 2px 8px 0; }
 
 /* ----- Pacotes ----- */
 #packages-dialog { width: min(940px, 94vw); height: min(680px, 88vh); padding: 0; overflow: hidden; }

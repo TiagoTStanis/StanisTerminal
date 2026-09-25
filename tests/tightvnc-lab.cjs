@@ -10,7 +10,7 @@ const { vncResponse, FT } = require('../src/tightft.cjs');
 
 function labServer({ password = 'lab123', fileTransfer = true, rfb = false } = {}) {
   const files = new Map([['/C:/pasta/antigo.txt', Buffer.from('conteúdo antigo')]]); const dirs = new Set(['/C:/pasta']);
-  const sockets = new Set();
+  const sockets = new Set(); const keys = []; // teclas recebidas pela tela: 'keysym:1|0'
   const server = net.createServer(socket => {
     sockets.add(socket); socket.on('close', () => sockets.delete(socket));
     let buf = Buffer.alloc(0); const waiters = [];
@@ -37,7 +37,7 @@ function labServer({ password = 'lab123', fileTransfer = true, rfb = false } = {
           await read(9); const header = Buffer.alloc(16); header.writeUInt16BE(1, 2); header.writeUInt16BE(64, 8); header.writeUInt16BE(64, 10);
           const pixels = Buffer.alloc(64 * 64 * 4); for (let i = 0; i < pixels.length; i += 4) pixels[i + 1] = 160;
           socket.write(Buffer.concat([header, pixels]));
-        } else if (type === 4) await read(7);
+        } else if (type === 4) { const k = await read(7); keys.push(`${k.readUInt32BE(3).toString(16)}:${k[0]}`); }
         else if (type === 5) await read(5);
         else if (type === 6) { const head = await read(7); await read(head.readUInt32BE(3)); }
         else return socket.end();
@@ -93,6 +93,6 @@ function labServer({ password = 'lab123', fileTransfer = true, rfb = false } = {
     })().catch(() => socket.destroy());
   });
   const close = () => { for (const socket of sockets) socket.destroy(); server.close(); };
-  return new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port, files, dirs, close })));
+  return new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port, files, dirs, keys, close })));
 }
 module.exports = { labServer };
