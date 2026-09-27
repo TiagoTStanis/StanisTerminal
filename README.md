@@ -6,7 +6,7 @@ O projeto se inspira no uso de sessões do MobaXterm e do WindTerm. É um aplica
 
 ## Para usar
 
-Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.18.2-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
+Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.19.0-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
 
 **Evite a versão de arquivo único** (`StanisTerminal-*-win-x64-PORTATIL-LENTO-usar-o-zip.exe`): ela extrai os componentes a cada execução — não só na primeira — e pode levar mais de um minuto toda vez que você abrir. Use-a apenas para testar rapidamente em um computador onde você não vai instalar nada; para uso do dia a dia, use sempre o ZIP extraído. Não precisa instalar Node.js, Python ou Electron em nenhuma das distribuições. Use Windows 10/11 de 64 bits e uma pasta em que você possa salvar arquivos, como Documentos. Consulte os arquivos já publicados em [Releases](https://github.com/TiagoTStanis/StanisTerminal/releases); gerar um pacote local não o publica automaticamente. Para arquivos publicados, confira o SHA-256 e a assinatura GPG do release (veja [como verificar](docs/VERIFICAR-ASSINATURA.md); impressão digital `A345 44C3 43F2 E16B EF64  C7A4 95A1 3721 ED00 B9E6`).
 
@@ -18,6 +18,8 @@ Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-
 O [manual de uso](docs/LEIA-ME.md) explica backups, X11, atalhos e mensagens comuns. Os [resultados de validação](docs/VALIDACAO.md) separam o que foi testado das conexões que dependem do seu ambiente.
 
 ## Recursos
+
+**Novo na 1.19.0 — produtividade:** a aba ativa fica visível mesmo com muitas sessões; `Ctrl+Tab` e `Ctrl+Shift+Tab` alternam abas; `Ctrl+Shift+P` busca sessões abertas. O modo foco mantém a barra de abas. A barra do VNC/RDP fica fixa sem cobrir o desktop, com opção de ocultação automática. Corrigidos o botão Colar texto, o retorno de janelas web e o foco ao alternar sessões. O clipboard remoto só atualiza o Windows pela sessão em uso. Veja [correções, uso e limites da validação](docs/PRODUTIVIDADE-1.19.0.md).
 
 **Novo na 1.18.2 (cores do terminal sempre iguais):** a saída do equipamento chega picotada, e quando uma palavra (ex.: GigabitEthernet1/0/1) ou um código de cor do próprio servidor era cortado entre dois pedaços, a mesma saída saía às vezes colorida, às vezes não, e às vezes com lixo como "[32m" na tela. Agora, como no ChromaTerm, as linhas completas são coloridas na hora e o fim de linha cortado espera o resto (no máximo 100 ms) antes de colorir, inclusive em serial e Telnet lentos. O eco do que se digita continua saindo na hora. Nos testes, a mesma saída picotada de 1 a 300 bytes sai idêntica à saída inteira.
 

@@ -15,3 +15,12 @@ src/ui/rdp_client_bg.wasm
 src/native/*.exe
 src/ui/icon.ico
 src/ui/icon.png
+
+# Sondagens locais e dados de conexões nunca entram na distribuição ou no Git.
+.probe*
+.split-probe*
+*.rdp
+.env
+.env.*
+!.env.example
+credentials.json

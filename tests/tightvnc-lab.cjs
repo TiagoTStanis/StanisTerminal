@@ -11,6 +11,11 @@ const { vncResponse, FT } = require('../src/tightft.cjs');
 function labServer({ password = 'lab123', fileTransfer = true, rfb = false } = {}) {
   const files = new Map([['/C:/pasta/antigo.txt', Buffer.from('conteúdo antigo')]]); const dirs = new Set(['/C:/pasta']);
   const sockets = new Set(); const keys = []; // teclas recebidas pela tela: 'keysym:1|0'
+  const screens = new Set(), clipboards = [];
+  const sendClipboard = text => {
+    const body = Buffer.from(text, 'latin1'), header = Buffer.alloc(8); header[0] = 3; header.writeUInt32BE(body.length, 4);
+    for (const socket of screens) if (!socket.destroyed) socket.write(Buffer.concat([header, body]));
+  };
   const server = net.createServer(socket => {
     sockets.add(socket); socket.on('close', () => sockets.delete(socket));
     let buf = Buffer.alloc(0); const waiters = [];
@@ -29,6 +34,7 @@ function labServer({ password = 'lab123', fileTransfer = true, rfb = false } = {
     // Tela mínima para o noVNC: responde pedidos de atualização com um quadro verde e ignora o resto.
     const screen = async () => {
       socket.write(u32(0)); await read(1); socket.write(serverInit());
+      screens.add(socket); socket.on('close', () => screens.delete(socket));
       for (;;) {
         const type = (await read(1))[0];
         if (type === 0) await read(19);
@@ -39,7 +45,7 @@ function labServer({ password = 'lab123', fileTransfer = true, rfb = false } = {
           socket.write(Buffer.concat([header, pixels]));
         } else if (type === 4) { const k = await read(7); keys.push(`${k.readUInt32BE(3).toString(16)}:${k[0]}`); }
         else if (type === 5) await read(5);
-        else if (type === 6) { const head = await read(7); await read(head.readUInt32BE(3)); }
+        else if (type === 6) { const head = await read(7); clipboards.push((await read(head.readUInt32BE(3))).toString('latin1')); }
         else return socket.end();
       }
     };
@@ -93,6 +99,6 @@ function labServer({ password = 'lab123', fileTransfer = true, rfb = false } = {
     })().catch(() => socket.destroy());
   });
   const close = () => { for (const socket of sockets) socket.destroy(); server.close(); };
-  return new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port, files, dirs, keys, close })));
+  return new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port, files, dirs, keys, clipboards, sendClipboard, close })));
 }
 module.exports = { labServer };

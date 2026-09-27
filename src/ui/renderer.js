@@ -37,6 +37,23 @@ function fullscreenButton(pane) {
   document.addEventListener('fullscreenchange', () => { btn.textContent = document.fullscreenElement === pane ? '⛶ Sair da tela cheia' : '⛶ Tela cheia'; });
   return btn;
 }
+function attachGraphicToolbar(item, bar) {
+  let pinned = true;
+  try { pinned = localStorage.getItem('remote-toolbar-floating') !== '1'; } catch { /* usa barra fixa */ }
+  const pin = button('', () => {
+    pinned = !pinned; update();
+    try { localStorage.setItem('remote-toolbar-floating', pinned ? '0' : '1'); } catch { /* preferência opcional */ }
+    focusSession(item);
+  });
+  pin.className = 'toolbar-pin';
+  function update() {
+    item.pane.classList.toggle('toolbar-pinned', pinned);
+    pin.textContent = pinned ? 'Barra: fixa' : 'Fixar barra';
+    pin.title = pinned ? 'Ocultar automaticamente a barra da sessão' : 'Manter ferramentas visíveis sem cobrir a tela remota';
+    pin.setAttribute('aria-pressed', String(pinned));
+  }
+  bar.prepend(pin); item.pane.append(bar); update();
+}
 const PALETTES = {
   dark: { background: '#0d1420', foreground: '#d2e0ef', cursor: '#50d8bc', selectionBackground: '#315365', black: '#172231', red: '#ee7d8b', green: '#6cd6a1', yellow: '#e8c47b', blue: '#7ab8f4', magenta: '#c298e8', cyan: '#64d4dd', white: '#e1e9f1' },
   light: { background: '#ffffff', foreground: '#1f2933', cursor: '#2563eb', selectionBackground: '#cfe0ff', selectionForeground: '#1f2933', black: '#1f2933', red: '#c62828', green: '#1b7f4b', yellow: '#946200', blue: '#1d4fd0', magenta: '#8b3fb5', cyan: '#0c7a8a', white: '#8a94a3', brightBlack: '#6b7785', brightRed: '#e53935', brightGreen: '#2e9e63', brightYellow: '#b57a00', brightBlue: '#3b6fe8', brightMagenta: '#a557cf', brightCyan: '#1596a8', brightWhite: '#4b5563' },
@@ -51,6 +68,21 @@ function safe(fn) { return (...args) => Promise.resolve().then(() => fn(...args)
 function button(label, action, className = '') { const el = document.createElement('button'); el.type = 'button'; el.textContent = label; el.className = className; el.onclick = safe(action); return el; }
 function elem(tag, text, className = '') { const el = document.createElement(tag); el.textContent = text; el.className = className; return el; }
 function current() { return sessions.get(activeId); }
+// Cada janela só sincroniza a sessão que está sendo usada nela.
+function clipboardOwner(item) {
+  return !item.ended && !item.pane.hidden && !item.pane.ownerDocument.querySelector('dialog[open]') && item.pane.ownerDocument.hasFocus() && (!!item.popout || activeId === item.id);
+}
+function focusSession(item) {
+  if (!item) return;
+  if (document.fullscreenElement && document.fullscreenElement !== item.pane) {
+    return document.exitFullscreen().then(() => focusSession(item)).catch(error => toast(error.message));
+  }
+  if (item.popout) { item.popout.focus(); return; }
+  activeId = item.id; layout();
+  if (item.terminal) item.terminal.focus();
+  else if (item.webview) item.webview.focus();
+  else item.mount?.querySelector('canvas')?.focus();
+}
 
 function form(spec) { return new Promise(resolve => { dialogQueue.push({ spec, resolve }); showNextDialog(); }); }
 function showNextDialog() {
@@ -151,7 +183,7 @@ function openWebSession(profile) {
   if (sessions.size >= 24) throw new Error('Limite de 24 sessões nesta versão.');
   const item = { id: 'web-' + crypto.randomUUID(), profile, name: profile.name, graphical: true, web: true, ended: false };
   item.pane = elem('section', '', 'pane'); item.pane.dataset.session = item.id;
-  item.pane.addEventListener('mousedown', () => { activeId = item.id; renderTabs(); });
+  item.pane.addEventListener('mousedown', () => { if (activeId !== item.id) { activeId = item.id; layout(); } });
   sessions.set(item.id, item); $('panes').append(item.pane); activeId = item.id; layout();
   item.mount = elem('div', '', 'graphic-mount web-mount'); item.pane.append(item.mount);
   const address = elem('span', profile.url, 'web-address');
@@ -252,7 +284,7 @@ async function openSession(profile) {
   const result = await call(graphical ? 'graphics:open' : 'terminal:open', profile);
   const item = { ...result, graphical, ended: false };
   item.pane = elem('section', '', 'pane'); item.pane.dataset.session = item.id;
-  item.pane.addEventListener('mousedown', () => { activeId = item.id; renderTabs(); });
+  item.pane.addEventListener('mousedown', () => { if (activeId !== item.id) { activeId = item.id; layout(); } });
   sessions.set(item.id, item); $('panes').append(item.pane);
   // Dimensiona o painel ANTES de montar a sessão: o RDP lê item.mount.clientWidth/Height pra decidir
   // a resolução da tela remota, e sem isso o painel ainda não tinha sido ativado por layout() (podia
@@ -389,12 +421,14 @@ async function openSession(profile) {
       const LATIN1 = { '\u2013': '-', '\u2014': '-', '\u2212': '-', '\u2018': "'", '\u2019': "'", '\u201a': "'", '\u201c': '"', '\u201d': '"', '\u201e': '"', '\u2026': '...', '\u2022': '*', '\u00a0': ' ', '\u2009': ' ', '\u200b': '', '\u2192': '->', '\u2190': '<-' };
       const toLatin1 = text => text.replace(/[\u0100-\uffff]/g, char => LATIN1[char] ?? '?');
       item.rfb.addEventListener('clipboard', event => {
+        if (!clipboardOwner(item)) return;
         lastText = event.detail.text; writing++;
         safe(async () => { try { await call('clipboard:write', event.detail.text); } finally { writing--; } })();
       });
       const syncClipboard = async (force = false) => {
-        if (item.ended || !item.rfb || writing) return;
+        if (!clipboardOwner(item) || !item.rfb || writing) return;
         const text = await call('clipboard:read').catch(() => '');
+        if (!clipboardOwner(item) || writing) return;
         if (text && (force || text !== lastText)) { lastText = text; item.rfb.clipboardPasteFrom(toLatin1(text)); }
       };
       const sendClipboard = () => safe(() => syncClipboard(true))();
@@ -467,14 +501,19 @@ async function openSession(profile) {
       const bar = elem('div', '', 'graphic-toolbar');
       bar.append(
         button('⌨ Ctrl+Alt+Del', () => item.rfb.sendCtrlAltDel()),
-        button('📋 Colar texto', sendClipboard),
+        button('📋 Colar texto', async () => {
+          if (pasting || waiting) return;
+          const text = await call('clipboard:read');
+          if (!text || item.ended) return;
+          focusSession(item); pasteText(text);
+        }),
         button('↗ TightVNC Viewer (janela separada)', async () => { const r = await call('vnc:openViewer', profile); toast(`Abrindo no TightVNC Viewer, em janela própria (${r.viewer}). A senha é pedida por ele.`); }),
         // Arquivos pelo TightVNC (tightft.cjs); se o servidor não permitir, o painel oferece a rede do host (C$/SSH).
         (item.viewButton = button('', openZoomMenu)),
         button('📁 Arquivos', async () => { activeId = item.id; $('file-panel').hidden = false; layout(); await syncFiles(true); }),
         fullscreenButton(item.pane)
       );
-      item.pane.append(bar); setView(item.vncView);
+      attachGraphicToolbar(item, bar); setView(item.vncView);
       await call('graphics:activate', item.id);
     } else if (profile.type === 'rdp') {
       await openRdp(item, result);
@@ -537,13 +576,14 @@ async function openRdp(item, result) {
   // rdpSent: último texto que o servidor já conhece (enviado daqui ou copiado lá), para não reanunciar à toa.
   let rdpSent = null;
   builder.remoteClipboardChangedCallback(clipboardData => safe(() => {
-    if (clipboardData.isEmpty()) return;
-    for (const entry of clipboardData.items()) if (entry.mimeType() === 'text/plain') { rdpSent = entry.value(); call('clipboard:write', entry.value()); }
+    if (!clipboardOwner(item) || clipboardData.isEmpty()) return;
+    for (const entry of clipboardData.items()) if (entry.mimeType() === 'text/plain') { rdpSent = entry.value(); return call('clipboard:write', entry.value()); }
   })());
   // Devolve true quando anunciou um texto novo ao servidor.
   const syncRdpClipboard = async (force = false) => {
-    if (!item.rdpSession) return false;
+    if (!item.rdpSession || !clipboardOwner(item)) return false;
     const text = await call('clipboard:read'); if (!text || (!force && text === rdpSent)) return false;
+    if (!clipboardOwner(item)) return false;
     const data = new rdp.ClipboardData(); data.addText('text/plain', text);
     await item.rdpSession.onClipboardPaste(data); rdpSent = text; return true;
   };
@@ -677,11 +717,22 @@ async function openRdp(item, result) {
       tx.addEvent(rdp.DeviceEvent.keyPressed(0x1D)); tx.addEvent(rdp.DeviceEvent.keyPressed(0x38)); tx.addEvent(rdp.DeviceEvent.keyPressed(0x53));
       tx.addEvent(rdp.DeviceEvent.keyReleased(0x53)); tx.addEvent(rdp.DeviceEvent.keyReleased(0x38)); tx.addEvent(rdp.DeviceEvent.keyReleased(0x1D));
     })),
-    button('📋 Colar texto', sendClipboard),
+    button('📋 Colar texto', async () => {
+      if (rdpPasting) return;
+      focusSession(item);
+      rdpPasting = syncRdpClipboard(true).then(() => new Promise(resolve => setTimeout(resolve, 100))).then(() => {
+        runInput(tx => {
+          tx.addEvent(rdp.DeviceEvent.keyPressed(0x1D)); tx.addEvent(rdp.DeviceEvent.keyPressed(0x2F));
+          tx.addEvent(rdp.DeviceEvent.keyReleased(0x2F)); tx.addEvent(rdp.DeviceEvent.keyReleased(0x1D));
+        });
+        for (const [queued, down] of rdpQueue.splice(0)) sendKey(queued, down);
+      }).finally(() => { rdpPasting = null; });
+      await rdpPasting;
+    }),
     uploadBtn, downloadBtn,
     fullscreenButton(item.pane)
   );
-  item.pane.append(bar);
+  attachGraphicToolbar(item, bar);
   item.rdpSession.run().then(info => {
     item.ended = true; toast('RDP desconectado' + (info?.reason ? ': ' + info.reason() : '.')); renderTabs();
   }).catch(error => { item.ended = true; toast('RDP: ' + rdpErrorText(error)); renderTabs(); });
@@ -719,8 +770,8 @@ async function closeSession(id, force = false) {
   } else await call(item.graphical ? 'graphics:close' : 'terminal:close', id);
   item.closing = true; try { item.popout?.close(); } catch { /* já fechada */ } item.popout = null;
   clearInterval(item.clipboardTimer); if (item.tightId) call('files:tightClose', item.tightId).catch(() => {}); item.rfb?.disconnect(); try { item.rdpSession?.shutdown(); } catch { /* já encerrada */ } item.terminal?.dispose(); item.pane.remove(); sessions.delete(id);
-  if (activeId === id) activeId = [...sessions.keys()].at(-1);
-  layout(); scheduleSaveOpen();
+  if (activeId === id) activeId = [...sessions.values()].filter(other => !other.popout).at(-1)?.id;
+  layout(); focusSession(current()); scheduleSaveOpen();
 }
 // ---------- Sessão em janela separada (outro monitor) ----------
 // A janela nova é filha desta (mesmo processo, about:blank): o painel da sessão é MOVIDO para lá vivo — a
@@ -759,6 +810,7 @@ function popOut(item, at = null) {
 }
 function dockBack(item, close = true) {
   const child = item.popout; if (!child) return;
+  if (child.web) return call('web:dock', item.id);
   item.popout = null; $('panes').append(document.adoptNode(item.pane));
   if (close) try { child.close(); } catch { /* já fechada */ }
   activeId = item.id; layout(); requestAnimationFrame(() => { item.fit?.fit(); item.rfb?._updateScale?.(); item.terminal?.focus(); });
@@ -784,7 +836,7 @@ api.on('web:docked', ({ session, url, zoom }) => {
   item.setKeepAlive?.(item.keepAlive);
   activeId = item.id; layout(); window.focus();
 });
-const dockAll = () => { for (const item of sessions.values()) dockBack(item); window.focus(); };
+const dockAll = async () => { for (const item of sessions.values()) await dockBack(item); window.focus(); };
 window.addEventListener('beforeunload', () => { for (const item of sessions.values()) try { item.popout?.close(); } catch { /* ignora */ } });
 // Aviso na área das sessões quando todas estão em janelas separadas (antes ficava só um fundo vazio).
 const panesEmpty = elem('div', '', 'panes-empty'); panesEmpty.hidden = true;
@@ -799,9 +851,12 @@ function renderTabs() {
   const rebuild = $('tabs').dataset.signature !== signature;
   if (rebuild) { $('tabs').replaceChildren(); $('tabs').dataset.signature = signature; }
   for (const item of sessions.values()) {
-    if (!rebuild) { const tab = [...$('tabs').children].find(tab => tab.dataset.id === String(item.id)); tab.classList.toggle('active', item.id === activeId); tab.setAttribute('aria-selected', String(item.id === activeId)); item.pane.classList.toggle('selected', item.id === activeId); continue; }
+    if (!rebuild) { const tab = [...$('tabs').children].find(tab => tab.dataset.id === String(item.id)); tab.classList.toggle('active', item.id === activeId); tab.tabIndex = item.id === activeId ? 0 : -1; tab.setAttribute('aria-selected', String(item.id === activeId)); item.pane.classList.toggle('selected', item.id === activeId); continue; }
     const tab = elem('div', '', 'tab' + (item.id === activeId ? ' active' : '')); tab.setAttribute('role', 'tab'); tab.setAttribute('aria-selected', String(item.id === activeId));
     tab.dataset.id = String(item.id);
+    tab.tabIndex = item.id === activeId ? 0 : -1;
+    tab.title = `${item.name} — ${item.profile.type.toUpperCase()}${item.ended ? ' — encerrada' : ''}`;
+    tab.onkeydown = event => { if (event.target !== tab) return; if (['Enter', ' '].includes(event.key)) { event.preventDefault(); focusSession(item); } };
     tab.ondblclick = event => { if (event.target.closest('button')) return; activeId = item.id; setFocusMode(!document.body.classList.contains('focus-mode')); };
     tab.append(elem('span', (item.ended ? '○ ' : '● ') + (item.popout ? '⧉ ' : '') + item.name));
     if (!['x11', 'xdmcp'].includes(item.profile.type)) {
@@ -815,12 +870,73 @@ function renderTabs() {
       };
     }
     const close = button('✕', event => { event.stopPropagation(); return closeSession(item.id); }); close.title = 'Fechar sessão'; tab.append(close);
-    tab.onclick = event => { if (event.target.closest('button')) return; if (item.popout) { item.popout.focus(); return; } activeId = item.id; layout(); item.terminal?.focus(); }; $('tabs').append(tab);
+    tab.onclick = event => { if (event.target.closest('button')) return; focusSession(item); }; $('tabs').append(tab);
     item.pane.classList.toggle('selected', item.id === activeId);
   }
   const item = current(); const labelText = item ? `${item.profile.type.toUpperCase()}  /  ${item.profile.host || item.profile.shell || item.profile.device || 'Local'}  /  ${item.name}` : 'Pronto para conectar'; $('session-label').textContent = labelText; $('session-label').title = labelText;
   $('session-count').textContent = `${sessions.size} sessões`; $('log').textContent = item?.logging ? '● Parar gravação' : 'Gravar saída';
+  // Só reposiciona na troca/criação de aba: rolar para consultar outras abas continua possível.
+  const selected = String(activeId ?? '');
+  if (rebuild || $('tabs').dataset.selected !== selected) {
+    $('tabs').dataset.selected = selected;
+    requestAnimationFrame(revealActiveTab);
+  }
 }
+function revealActiveTab() {
+  const tabs = $('tabs'), active = tabs.querySelector('.active'); if (!active) return;
+  const box = tabs.getBoundingClientRect(), rect = active.getBoundingClientRect();
+  if (rect.left < box.left) tabs.scrollLeft += rect.left - box.left;
+  else if (rect.right > box.right) tabs.scrollLeft += rect.right - box.right;
+}
+$('tabs').addEventListener('wheel', event => {
+  if (event.ctrlKey || Math.abs(event.deltaX) > Math.abs(event.deltaY) || $('tabs').scrollWidth <= $('tabs').clientWidth) return;
+  event.preventDefault(); $('tabs').scrollLeft += event.deltaY;
+}, { passive: false });
+new ResizeObserver(() => requestAnimationFrame(revealActiveTab)).observe($('tabs'));
+
+// Lista compacta: busca nas sessões já abertas, sem reconectar ou duplicar abas.
+const sessionPicker = elem('dialog', '', 'session-picker'); sessionPicker.id = 'session-picker';
+const pickerTitle = elem('h2', 'Sessões abertas'); pickerTitle.id = 'session-picker-title';
+sessionPicker.setAttribute('aria-labelledby', pickerTitle.id);
+const sessionFilter = elem('input'); sessionFilter.id = 'session-filter'; sessionFilter.placeholder = 'Buscar sessão aberta…'; sessionFilter.setAttribute('aria-label', 'Buscar sessão aberta');
+const sessionResults = elem('div'); sessionResults.id = 'session-results';
+const pickerClose = button('Fechar', () => sessionPicker.close());
+sessionPicker.append(pickerTitle, sessionFilter, sessionResults, pickerClose); document.body.append(sessionPicker);
+function renderSessionPicker() {
+  const query = sessionFilter.value.trim().toLocaleLowerCase(); sessionResults.replaceChildren();
+  for (const item of sessions.values()) {
+    const label = `${item.name} · ${item.profile.type.toUpperCase()}${item.popout ? ' · janela separada' : ''}${item.ended ? ' · encerrada' : ''}`;
+    if (!label.toLocaleLowerCase().includes(query)) continue;
+    const entry = button(label, () => { sessionPicker.close(); focusSession(item); });
+    entry.classList.toggle('selected', item.id === activeId); sessionResults.append(entry);
+  }
+  if (!sessionResults.children.length) sessionResults.append(elem('p', 'Nenhuma sessão encontrada.'));
+}
+function showSessionPicker() {
+  if (document.querySelector('dialog[open]')) return;
+  sessionFilter.value = ''; renderSessionPicker(); sessionPicker.showModal(); sessionFilter.focus();
+}
+sessionFilter.oninput = renderSessionPicker;
+sessionPicker.addEventListener('keydown', event => {
+  const entries = [...sessionResults.querySelectorAll('button')], at = entries.indexOf(document.activeElement);
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault(); entries[(at + (event.key === 'ArrowDown' ? 1 : -1) + entries.length) % entries.length]?.focus();
+  } else if (event.key === 'Enter' && event.target === sessionFilter) { event.preventDefault(); entries[0]?.click(); }
+});
+const sessionSwitcher = button('▾', showSessionPicker); sessionSwitcher.id = 'session-switcher';
+sessionSwitcher.title = 'Buscar sessões abertas (Ctrl+Shift+P)'; sessionSwitcher.setAttribute('aria-label', sessionSwitcher.title);
+$('add-tab').after(sessionSwitcher);
+$('exit-focus').removeAttribute('hidden'); document.querySelector('.tabbar').append($('exit-focus'));
+api.on('workspace:shortcut', shortcut => {
+  if (!current()?.webview || current().webview.getWebContentsId() !== shortcut.id) return;
+  document.dispatchEvent(new KeyboardEvent('keydown', { ...shortcut, bubbles: true, cancelable: true }));
+});
+const topbarMore = button('⋯', () => {
+  const box = topbarMore.getBoundingClientRect();
+  tree?.openMenu(box.left, box.bottom + 4, ['open-packages', 'open-tools'].map(id => ({ label: $(id).textContent, action: () => $(id).click() })));
+});
+topbarMore.id = 'topbar-more'; topbarMore.title = 'Pacotes e ferramentas'; topbarMore.setAttribute('aria-label', topbarMore.title);
+document.querySelector('.topbar nav').append(topbarMore);
 function layout() {
   renderTabs(); $('welcome').hidden = sessions.size > 0;
   const toolbar = document.querySelector('.workspace-toolbar'), tabbar = document.querySelector('.tabbar');
@@ -1202,10 +1318,18 @@ document.addEventListener('mousemove', event => {
 // Captura antes do xterm/RDP; Esc continua disponível para a sessão remota.
 document.addEventListener('keydown', event => {
   if (document.querySelector('dialog[open]')) return;
+  if (event.ctrlKey && !event.altKey && !event.metaKey && (event.code === 'Tab' || (event.shiftKey && event.code === 'KeyP'))) {
+    event.preventDefault(); event.stopImmediatePropagation();
+    if (event.code === 'KeyP') { if (!event.repeat) showSessionPicker(); return; }
+    const list = [...sessions.values()].filter(item => !item.popout); if (!list.length) return;
+    const at = list.findIndex(item => item.id === activeId);
+    focusSession(list[(at + (event.shiftKey ? -1 : 1) + list.length) % list.length]); return;
+  }
   const lateral = event.ctrlKey && event.shiftKey && !event.altKey && event.code === 'KeyB'; // Ctrl+B fica livre para o tmux e a sessão remota
   const foco = event.key === 'F11' && !event.ctrlKey && !event.altKey && !event.shiftKey;
   if (!lateral && !foco) return;
   event.preventDefault(); event.stopImmediatePropagation(); if (event.repeat) return;
+  if (foco && document.fullscreenElement) { safe(() => document.exitFullscreen())(); return; }
   if (lateral) $('toggle-sidebar').click(); else $('focus-mode').click();
 }, true);
 

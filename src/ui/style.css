@@ -315,9 +315,19 @@ button.primary:hover { filter: brightness(1.08); }
 button.small { background: var(--accent-bg); color: var(--accent); height: 28px; }
 button.small.primary { background: var(--accent); color: var(--accent-fg); }
 button.small.danger { background: var(--danger-bg); color: var(--danger); }
-.topbar { height: 40px; padding: 0 12px; gap: 8px; overflow-x: auto; }
+.topbar { height: 40px; padding: 0 12px; gap: 8px; }
 .topbar > *, .topbar nav > * { flex-shrink: 0; }
-.topbar nav { min-width: max-content; }
+.topbar nav { min-width: 0; flex: 1 1 auto; }
+.topbar .quick { flex: 1 1 240px; min-width: 180px; max-width: 340px; margin: 0 4px; }
+.topbar .quick input { width: 100%; min-width: 70px; flex: 1; }
+#topbar-more { display: none; flex-shrink: 0; padding: 0 8px; }
+@media (max-width: 1250px) { .topbar .brand strong, .topbar .local-badge { display: none; } }
+@media (max-width: 1100px) {
+  .topbar #open-packages, .topbar #open-tools { display: none; }
+  #topbar-more { display: block; }
+  .topbar nav > button { padding: 0 8px; }
+}
+@media (max-width: 700px) { .topbar #local-shell { display: none; } }
 #toggle-sidebar { width: 28px; padding: 0; }
 .sidebar { padding: 8px; transition: width .15s ease, padding .15s ease; overflow: hidden; }
 .sidebar.collapsed { width: 0; padding: 0; border: 0; }
@@ -326,16 +336,23 @@ button.small.danger { background: var(--danger-bg); color: var(--danger); }
 .import-actions { gap: 8px; margin-bottom: 8px; }
 .tabbar { height: 32px; min-height: 32px; padding-left: 4px; align-items: center; gap: 4px; overflow: hidden; }
 /* As abas têm prioridade de espaço; o que não cabe da barra vai para o menu ⋯. */
-#tabs { flex: 1 1 auto; min-width: 120px; padding-top: 3px; }
-#tabs .tab { height: 28px; min-width: 130px; padding: 0 4px 0 10px; color: var(--muted); border-bottom: 2px solid transparent; border-radius: 0; background: none; box-shadow: none; transition: color .12s, border-color .12s; }
+#tabs { flex: 1 1 0; min-width: 150px; padding-top: 3px; }
+#tabs .tab { flex: 0 0 auto; height: 28px; min-width: 130px; padding: 0 4px 0 10px; color: var(--muted); border-bottom: 2px solid transparent; border-radius: 0; background: none; box-shadow: none; transition: color .12s, border-color .12s; }
 #tabs .tab:hover { color: var(--text); background: var(--hover); border-radius: 8px 8px 0 0; }
 #tabs .tab.active { color: var(--accent); border-bottom-color: var(--accent); background: none; box-shadow: none; font-weight: 600; }
 #add-tab { width: 24px; height: 24px; flex-shrink: 0; }
+#session-switcher { width: 28px; height: 24px; flex-shrink: 0; padding: 0; }
+.session-picker { width: min(520px, 90vw); }
+.session-picker input { width: 100%; margin: 12px 0; }
+#session-results { display: flex; flex-direction: column; gap: 4px; max-height: 50vh; overflow: auto; margin-bottom: 12px; }
+#session-results button { text-align: left; min-height: 34px; height: auto; padding: 8px; overflow-wrap: anywhere; flex-shrink: 0; }
+#session-results .selected { background: var(--hover); color: var(--accent); }
 .workspace-toolbar { height: 28px; min-height: 28px; padding: 0 8px 0 12px; }
-.tabbar > .workspace-toolbar { flex: 0 10 auto; min-width: 0; border: 0; gap: 8px; padding: 0 4px; }
-.tabbar .toolbar-actions { flex-shrink: 1; min-width: 0; overflow: hidden; }
+.tabbar > .workspace-toolbar { flex: 0 1 260px; max-width: 42%; min-width: 40px; border: 0; gap: 4px; padding: 0 4px; }
+.tabbar .toolbar-actions { flex: 1 1 auto; min-width: 0; overflow: hidden; }
+.tabbar .toolbar-actions button { flex-shrink: 0; }
 #toolbar-more { flex-shrink: 0; width: 28px; padding: 0; font-weight: 700; }
-.tabbar #session-label { max-width: 120px; font-size: 11px; }
+.tabbar #session-label { display: none; }
 .toolbar-actions { gap: 4px; flex-shrink: 0; }
 .toolbar-actions button { padding: 0 6px; }
 footer { height: 22px; padding: 0 12px; }
@@ -355,12 +372,14 @@ dialog { border-radius: 16px; padding: 24px; box-shadow: var(--shadow-2); }
 .pane.show-bar > .graphic-toolbar, .graphic-toolbar:hover, .graphic-toolbar:focus-within { opacity: 1; pointer-events: auto; }
 .graphic-toolbar button { height: 28px; min-width: 28px; padding: 0 8px; border-radius: 6px; color: var(--text); background: var(--panel); flex-shrink: 0; }
 .graphic-toolbar button:hover { background: var(--hover); }
-body.focus-mode .topbar, body.focus-mode .sidebar, body.focus-mode .tabbar, body.focus-mode .workspace-toolbar, body.focus-mode footer, body.focus-mode #file-panel, body.focus-mode #findbar { display: none; }
+.pane.toolbar-pinned > .graphic-toolbar { top: 0; left: 0; right: 0; transform: none; max-width: none; height: 38px; border-radius: 0; opacity: 1; pointer-events: auto; box-shadow: none; }
+.pane.toolbar-pinned > .graphic-mount { top: 38px; }
+body.focus-mode .topbar, body.focus-mode .sidebar, body.focus-mode .workspace-toolbar, body.focus-mode footer, body.focus-mode #file-panel, body.focus-mode #findbar { display: none; }
 body.focus-mode .app-layout { height: 100vh; }
 
-/* #exit-focus fica oculto no modo foco e aparece com o mouse no topo da janela (detectado em JS, sem bloquear cliques na sessão). */
-#exit-focus { position: fixed; top: 6px; left: 12px; z-index: 20; height: 28px; background: var(--panel); color: var(--text); box-shadow: var(--shadow-2); display: none; opacity: 0; pointer-events: none; transition: opacity .15s; }
-body.focus-mode #exit-focus { display: block; }
+/* Sair do foco ocupa a própria barra de abas, sem cobrir a tela remota. */
+#exit-focus { position: static; flex-shrink: 0; height: 26px; background: var(--panel); color: var(--text); display: none; }
+body.focus-mode #exit-focus { display: block; opacity: 1; pointer-events: auto; }
 body.focus-mode #exit-focus:focus-visible { opacity: 1; pointer-events: auto; }
 body.focus-mode.reveal-exit #exit-focus, #exit-focus:hover { opacity: 1; pointer-events: auto; }
 

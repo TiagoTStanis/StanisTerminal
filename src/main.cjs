@@ -32,8 +32,13 @@ const testMode = process.argv.includes('--test-mode');
 const testData = testMode && !process.env.STANIS_TEST_USERDATA ? fs.mkdtempSync(path.join(os.tmpdir(), 'stanis-terminal-test-')) : null;
 if (testMode) app.setPath('userData', process.env.STANIS_TEST_USERDATA || testData);
 if (testData) app.on('will-quit', () => { try { fs.rmSync(testData, { recursive: true, force: true }); } catch { /* arquivos em uso: o sistema limpa a pasta temporária */ } });
-else if (process.env.PORTABLE_EXECUTABLE_DIR) app.setPath('userData', path.join(process.env.PORTABLE_EXECUTABLE_DIR, 'StanisTerminal-data'));
-else if (app.isPackaged) app.setPath('userData', path.join(path.dirname(app.getPath('exe')), 'StanisTerminal-data'));
+if (!testMode && process.env.PORTABLE_EXECUTABLE_DIR) app.setPath('userData', path.join(process.env.PORTABLE_EXECUTABLE_DIR, 'StanisTerminal-data'));
+else if (!testMode && app.isPackaged) app.setPath('userData', path.join(path.dirname(app.getPath('exe')), 'StanisTerminal-data'));
+const homeDirectory = testMode ? path.join(app.getPath('userData'), 'test-home') : os.homedir();
+if (testMode) {
+  fs.mkdirSync(homeDirectory, { recursive: true });
+  fs.writeFileSync(path.join(homeDirectory, 'exemplo.txt'), 'Arquivo sintetico para testes locais.\n');
+}
 if (!testMode && !app.requestSingleInstanceLock()) app.quit();
 app.on('second-instance', () => { if (window) { if (window.isMinimized()) window.restore(); window.focus(); } });
 let window, config, terminals, files, network, graphics, transfers, tools, vault, packages, msys, remoteFiles;
@@ -60,7 +65,7 @@ function handle(channel, fn) {
   });
 }
 function register() {
-  handle('init', () => ({ config: config.value, home: os.homedir(), dataPath: config.directory, version: app.getVersion(), testMode }));
+  handle('init', () => ({ config: config.value, home: homeDirectory, dataPath: config.directory, version: app.getVersion(), testMode }));
   handle('answer', (id, answer) => { const item = questions.get(id); if (item) { clearTimeout(item.timer); questions.delete(id); item.resolve(answer); } });
   handle('profile:save', value => {
     const saved = config.putProfile(value);
@@ -198,7 +203,11 @@ function register() {
     if (!Array.isArray(values) || values.length > 200) throw new Error('Limite de 200 comandos rápidos.');
     config.value.snippets = values.map(v => ({ name: text(v.name), command: text(v.command, 20000) })); config.save(); return config.value.snippets;
   });
-  handle('terminal:open', value => terminals.open(profile(value)));
+  handle('terminal:open', value => {
+    const cleaned = profile(value);
+    if (testMode && cleaned.type === 'local') cleaned.cwd = homeDirectory;
+    return terminals.open(cleaned);
+  });
   handle('terminal:activate', id => terminals.activate(id));
   handle('terminal:write', (id, value) => { if (typeof value !== 'string' || value.length > 1000000) throw new Error('Entrada inválida.'); const item = terminals.get(id); if (!item.ended) item.write(value); });
   handle('terminal:resize', (id, cols, rows) => { const item = terminals.get(id); if (!item.ended && Number.isInteger(cols) && Number.isInteger(rows) && cols > 0 && rows > 0 && cols < 1000 && rows < 1000) item.resize?.(cols, rows); });
@@ -511,6 +520,13 @@ app.on('web-contents-created', (_, contents) => {
   // Zoom da página (Ctrl + roda, Ctrl +/-/0): quem aplica é a aba, que guarda a escolha da sessão.
   contents.on('zoom-changed', (_, direction) => emit('web:zoom', { id: contents.id, step: direction === 'in' ? 1 : -1 }));
   contents.on('before-input-event', (event, input) => {
+    const workspaceKey = input.key === 'F11' && !input.control && !input.shift && !input.alt && !input.meta
+      || input.control && !input.alt && !input.meta && (input.key === 'Tab' || input.shift && input.code === 'KeyP');
+    if (workspaceKey) {
+      event.preventDefault();
+      if (input.type === 'keyDown') emit('workspace:shortcut', { id: contents.id, code: input.code, key: input.key, ctrlKey: input.control, shiftKey: input.shift });
+      return;
+    }
     if (input.type !== 'keyDown' || !input.control || input.alt || input.meta) return;
     const step = ['=', '+'].includes(input.key) ? 1 : input.key === '-' ? -1 : input.key === '0' ? 0 : null;
     if (step !== null) { event.preventDefault(); emit('web:zoom', { id: contents.id, step }); }

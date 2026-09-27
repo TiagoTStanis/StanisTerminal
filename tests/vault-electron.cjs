@@ -15,5 +15,7 @@ app.whenReady().then(() => {
     assert.strictEqual(vault.get({ ...profile, host: 'outro' }), null); vault.forget('r1'); assert.strictEqual(vault.get(profile), null);
     fs.rmSync(dir, { recursive: true, force: true }); console.log('PASS: cofre com DPAPI real (guardar, ler, escopo, esquecer, sem texto puro).');
   } catch (error) { console.error('FALHA:', error.message); code = 1; }
-  app.exit(code);
+  // Deixa a inicialização nativa terminar antes de encerrar o Electron (DPAPI/stdio).
+  // app.exit() dentro de whenReady podia terminar com acesso inválido mesmo após os asserts.
+  setImmediate(() => { if (code) app.exit(code); else app.quit(); });
 });
