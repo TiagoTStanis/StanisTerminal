@@ -24,6 +24,7 @@ const { MsysPackages, NAME: MSYS_NAME } = require('./msyspkg.cjs');
 const { execFile } = require('node:child_process');
 const { startVnc, cleanupStale } = require('./vncserver.cjs');
 const { SerialPort } = require('serialport');
+const { originOf, isGranted, remember } = require('./web-notifications.cjs');
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'stanis', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
 const testMode = process.argv.includes('--test-mode');
@@ -133,9 +134,12 @@ function register() {
       syncFolder: value.syncFolder === undefined ? previous.syncFolder || '' : text(value.syncFolder || '', 2048), autocomplete: value.autocomplete === undefined ? previous.autocomplete !== false : !!value.autocomplete,
       highlightErrors: value.highlightErrors === undefined ? previous.highlightErrors !== false : !!value.highlightErrors,
       checkOnline: value.checkOnline === undefined ? previous.checkOnline !== false : !!value.checkOnline,
+      webNotifications: value.webNotifications === undefined ? previous.webNotifications === true : !!value.webNotifications,
+      webNotificationPermissions: previous.webNotificationPermissions && typeof previous.webNotificationPermissions === 'object' ? previous.webNotificationPermissions : {},
       highlightSet: ['network', 'general'].includes(value.highlightSet) ? value.highlightSet : previous.highlightSet || 'network' };
     config.save(); return config.value.settings;
   });
+  handle('settings:notifications:reset', () => { config.value.settings.webNotificationPermissions = {}; config.save(); return true; });
   handle('macros:save', values => {
     if (!Array.isArray(values) || values.length > 100) throw new Error('Limite de 100 macros.');
     config.value.macros = values.map(v => {
@@ -534,7 +538,27 @@ app.on('web-contents-created', (_, contents) => {
 });
 app.whenReady().then(() => {
   const web = session.fromPartition(WEB_PARTITION);
-  web.setPermissionRequestHandler((_, permission, callback) => callback(['fullscreen', 'clipboard-sanitized-write'].includes(permission)));
+  const notificationPrompts = new Map();
+  const granted = origin => isGranted(config?.value.settings, origin);
+  web.setPermissionCheckHandler((_, permission, origin) => permission === 'notifications' ? granted(originOf(origin)) : ['fullscreen', 'clipboard-sanitized-write'].includes(permission));
+  web.setPermissionRequestHandler((contents, permission, callback, details) => {
+    if (permission !== 'notifications') { callback(['fullscreen', 'clipboard-sanitized-write'].includes(permission)); return; }
+    const origin = originOf(details.requestingUrl);
+    if (!origin || !details.isMainFrame || config.value.settings.webNotifications !== true) { callback(false); return; }
+    const saved = config.value.settings.webNotificationPermissions?.[origin];
+    if (typeof saved === 'boolean') { callback(saved && granted(origin)); return; }
+    if (!window || window.isDestroyed()) { callback(false); return; }
+    let prompt = notificationPrompts.get(origin);
+    if (!prompt) {
+      prompt = dialog.showMessageBox(window, { type: 'question', title: 'Notificação de página web', message: `A página ${origin} quer enviar notificações do sistema.`, detail: 'Permitir pode exibir avisos de novas mensagens, e-mails ou chamados mesmo quando a aba estiver em segundo plano.', buttons: ['Permitir', 'Bloquear'], defaultId: 1, cancelId: 1 }).then(result => {
+        const allow = result.response === 0 && config.value.settings.webNotifications === true;
+        remember(config.value.settings, origin, allow);
+        config.save(); return allow;
+      }).catch(() => false).finally(() => notificationPrompts.delete(origin));
+      notificationPrompts.set(origin, prompt);
+    }
+    prompt.then(allow => callback(allow && granted(origin))).catch(() => callback(false));
+  });
 });
 // Certificado próprio (comum em páginas de switch, firewall, iDRAC…): pergunta uma vez e lembra por host +
 // impressão digital, como a chave de um servidor SSH. Um certificado diferente depois pergunta de novo.

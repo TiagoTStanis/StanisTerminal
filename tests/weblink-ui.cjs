@@ -54,6 +54,9 @@ function labSite(IDLE_MS) {
     const webTitle = () => page.evaluate(() => document.querySelector('.pane:not([hidden]) webview')?.getTitle());
     await page.waitForFunction(() => /LOGIN|LOGADO/.test(document.querySelector('.pane:not([hidden]) webview')?.getTitle() || ''), null, { timeout: 15000 });
     assert.equal(await page.locator('#tabs .tab', { hasText: 'Firewall lab' }).count(), 1, 'o link abre numa aba');
+    const notifications = await page.evaluate(() => document.querySelector('.pane:not([hidden]) webview').executeJavaScript('Notification.requestPermission()'));
+    assert.equal(notifications, 'denied', 'notificações de sites ficam bloqueadas até ativar nas preferências');
+    console.log('PASS: página web não recebe permissão de notificações quando a opção geral está desligada.');
     await page.locator('#tabs .tab', { hasText: 'Firewall lab' }).locator('button', { hasText: '✕' }).click();
     await page.locator('#dialog-ok').click().catch(() => {}); await page.waitForTimeout(1000);
     assert.deepEqual(await app.evaluate(({ webContents }) => webContents.getAllWebContents().filter(w => w.getType() === 'webview' && !w.isDestroyed()).length), 0, 'fechar a aba libera a página');

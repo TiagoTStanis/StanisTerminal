@@ -27,7 +27,7 @@
     "test:windows": "node --openssl-legacy-provider tests/popout-ui.cjs",
     "test:web": "node tests/weblink-ui.cjs",
     "test:paste": "node tests/paste-ui.cjs",
-    "test:productivity": "node tests/productivity-ui.cjs && node --openssl-legacy-provider tests/remote-productivity-ui.cjs && node tests/test-isolation.cjs"
+    "test:productivity": "node tests/productivity-ui.cjs && node --openssl-legacy-provider tests/remote-productivity-ui.cjs && node tests/test-isolation.cjs && node tests/web-notification-settings-ui.cjs"
   },
   "dependencies": {
     "@novnc/novnc": "1.7.0",

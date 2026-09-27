@@ -8,8 +8,9 @@ const http = require('node:http');
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE; delete env.STANIS_TEST_USERDATA;
   const app = await electron.launch({ executablePath: process.env.STANIS_TEST_EXE || require('electron'), args: process.env.STANIS_TEST_EXE ? ['--test-mode'] : [root, '--test-mode'], env });
   const site = http.createServer((req, res) => res.end('<title>Lab produtividade</title><input autofocus>'));
+  let page;
   try {
-    const page = await app.firstWindow();
+    page = await app.firstWindow();
     await page.waitForSelector('#welcome-local');
     await page.setViewportSize({ width: 1100, height: 720 });
     await page.click('#welcome-local');
@@ -59,5 +60,12 @@ const http = require('node:http');
     await page.waitForFunction(() => !!document.querySelector('.pane:not([hidden]) webview'));
     console.log('PASS: Ctrl+Tab dentro da página web troca a sessão do aplicativo.');
     console.log('PASS: 12 abas, seleção visível, atalhos, busca, modo foco e janela estreita.');
-  } finally { await app.close(); site.close(); }
+  } finally {
+    await page?.evaluate(async () => {
+      const ids = [...document.querySelectorAll('#tabs .tab')].map(tab => tab.dataset.id);
+      await Promise.all(ids.map(id => window.api.call('terminal:close', id).catch(() => {})));
+      for (const view of document.querySelectorAll('webview')) view.remove();
+    }).catch(() => {});
+    await app.close(); site.closeAllConnections?.(); site.close();
+  }
 })().catch(error => { console.error(error); process.exitCode = 1; });
