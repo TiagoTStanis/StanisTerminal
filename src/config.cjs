@@ -77,6 +77,8 @@ function profile(input) {
       p.loadBalanceInfo = lb;
     }
   }
+  // Script de login (Lua, mesmo formato dos scripts do app): roda sozinho ao conectar em sessões de terminal.
+  if (['ssh', 'ssh-x11', 'telnet', 'rlogin', 'serial'].includes(p.type) && typeof input.loginScript === 'string' && input.loginScript.trim()) p.loginScript = text(input.loginScript, 20000);
   return p;
 }
 function readJSON(filename, fallback) {
