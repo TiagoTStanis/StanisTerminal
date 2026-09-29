@@ -27,6 +27,7 @@
     "test:windows": "node --openssl-legacy-provider tests/popout-ui.cjs",
     "test:popout-focus": "node --openssl-legacy-provider tests/popout-terminal-focus.cjs",
     "test:web": "node tests/weblink-ui.cjs",
+    "test:panel": "node tests/panel-ui.cjs",
     "test:paste": "node tests/paste-ui.cjs",
     "test:productivity": "node tests/productivity-ui.cjs && node --openssl-legacy-provider tests/remote-productivity-ui.cjs && node tests/test-isolation.cjs && node tests/web-notification-settings-ui.cjs"
   },

@@ -9,6 +9,7 @@ import scancode from './rdpkeys.js';
 import { setup } from './extras.js';
 import { setupPackages } from './packages.js';
 import { setupTree } from './tree.js';
+import { setupPanel } from './panel.js';
 import { highlight, createHighlightStream } from './highlight.js';
 
 // noVNC intencionalmente não expõe o motivo técnico da falha no evento 'disconnect' (só loga no console).
@@ -949,7 +950,7 @@ api.on('workspace:shortcut', shortcut => {
 });
 const topbarMore = button('⋯', () => {
   const box = topbarMore.getBoundingClientRect();
-  tree?.openMenu(box.left, box.bottom + 4, ['open-packages', 'open-tools'].map(id => ({ label: $(id).textContent, action: () => $(id).click() })));
+  tree?.openMenu(box.left, box.bottom + 4, ['open-panel', 'open-packages', 'open-tools'].map(id => ({ label: $(id).textContent, action: () => $(id).click() })));
 });
 topbarMore.id = 'topbar-more'; topbarMore.title = 'Pacotes e ferramentas'; topbarMore.setAttribute('aria-label', topbarMore.title);
 document.querySelector('.topbar nav').append(topbarMore);
@@ -1362,6 +1363,7 @@ document.addEventListener('keydown', event => {
 });
 extras = setup({ $, api, call, form, toast, safe, elem, button, sessions, state: () => state, current, tool, fileState, reloadFiles: directory => loadFiles(directory), refresh: () => { renderProfiles(); renderSnippets(); applySettings(); } });
 setupPackages({ $, api, call, form, toast, safe, elem, button, state: () => state, updateNativeBounds });
+setupPanel({ $, api, elem, button, state: () => state, openSession, tree: () => tree, updateNativeBounds });
 async function init() { state = await call('init'); state.secrets = await call('profile:secrets'); $('version').textContent = state.version; fileState.path = state.home; $('files-upload').hidden = true; renderProfiles(); renderSnippets(); applySettings(); }
 async function restoreOpenSessions() {
   if (!state.config.settings.restoreSessions) return;
