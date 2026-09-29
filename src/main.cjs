@@ -154,7 +154,11 @@ function register() {
   });
   // Senha mestra / bloqueio de tela: PBKDF2 (scrypt) local, independente do DPAPI. Protege contra alguém
   // com acesso à sua sessão Windows já aberta ver a lista de sessões; não protege contra quem tem sua senha do Windows.
-  handle('lock:status', () => ({ enabled: !!config.value.lock, autoLockMinutes: config.value.lock?.autoLockMinutes || 0 }));
+  handle('app:memory', () => {
+    const rows = app.getAppMetrics().map(p => ({ type: p.type, mb: Math.round(p.memory.workingSetSize / 1024) }));
+    return { total: rows.reduce((sum, p) => sum + p.mb, 0), rows };
+  });
+  handle('lock:status',() => ({ enabled: !!config.value.lock, autoLockMinutes: config.value.lock?.autoLockMinutes || 0 }));
   handle('lock:set', ({ password, autoLockMinutes }) => {
     if (typeof password !== 'string' || password.length < 4 || password.length > 200) throw new Error('A senha mestra precisa ter ao menos 4 caracteres.');
     const salt = crypto.randomBytes(16); const hash = crypto.scryptSync(password, salt, 32);
@@ -449,6 +453,8 @@ function register() {
     await fsp.mkdir(path.dirname(result.filePath), { recursive: true }); await fsp.writeFile(result.filePath, privateKey, { flag: 'wx', mode: 0o600 }); await fsp.writeFile(result.filePath + '.pub', publicKey, { flag: 'wx' }); return result.filePath;
   });
 }
+// gc() só é chamado pela interface depois de fechar sessões: o Chromium não devolve a memória do terminal sozinho.
+app.commandLine.appendSwitch('js-flags', '--expose-gc');
 app.whenReady().then(async () => {
   try {
     config = new Config(app.getPath('userData'));

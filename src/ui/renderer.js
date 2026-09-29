@@ -287,7 +287,7 @@ async function openSession(profile) {
   const item = { ...result, graphical, ended: false };
   item.pane = elem('section', '', 'pane'); item.pane.dataset.session = item.id;
   item.pane.addEventListener('mousedown', () => { if (activeId !== item.id) { activeId = item.id; layout(); } });
-  sessions.set(item.id, item); $('panes').append(item.pane);
+  sessions.set(item.id, item); $('panes').append(item.pane); rebalanceScrollback();
   // Dimensiona o painel ANTES de montar a sessão: o RDP lê item.mount.clientWidth/Height pra decidir
   // a resolução da tela remota, e sem isso o painel ainda não tinha sido ativado por layout() (podia
   // estar com 0 ou o tamanho de uma sessão anterior), deixando a imagem remota com proporção errada
@@ -296,7 +296,7 @@ async function openSession(profile) {
   if (!graphical) {
     const mount = elem('div', '', 'terminal-mount'); item.pane.append(mount);
     const terminal = new Terminal({ fontFamily: 'Cascadia Code, Consolas, monospace', fontSize: state.config.settings.fontSize, scrollback: state.config.settings.scrollback, cursorBlink: true, theme: theme(), allowProposedApi: false });
-    item.terminal = terminal; item.fit = new FitAddon(); item.search = new SearchAddon(); terminal.loadAddon(item.fit); terminal.loadAddon(item.search); terminal.open(mount);
+    item.terminal = terminal; item.fit = new FitAddon(); item.search = new SearchAddon(); terminal.loadAddon(item.fit); terminal.loadAddon(item.search); terminal.open(mount); rebalanceScrollback();
     terminal.loadAddon(new WebLinksAddon((_, uri) => safe(() => call('links:open', uri))())); extras.attach(item);
     // Teclas digitadas enquanto o texto a colar ainda está sendo lido esperam e seguem depois dele, na ordem.
     const typedDuringPaste = [];
@@ -773,8 +773,25 @@ async function closeSession(id, force = false) {
   item.closing = true; try { item.popout?.close(); } catch { /* já fechada */ } item.popout = null;
   clearInterval(item.clipboardTimer); if (item.tightId) call('files:tightClose', item.tightId).catch(() => {}); item.rfb?.disconnect(); try { item.rdpSession?.shutdown(); } catch { /* já encerrada */ } item.terminal?.dispose(); item.pane.remove(); sessions.delete(id); splitPicks.delete(id);
   if (activeId === id) activeId = [...sessions.values()].filter(other => !other.popout).at(-1)?.id;
-  layout(); focusSession(current()); scheduleSaveOpen();
+  rebalanceScrollback(); layout(); focusSession(current()); scheduleSaveOpen(); releaseMemory();
 }
+// O histórico de todos os terminais divide um orçamento de linhas (cada linha custa ~1 KB com 80 colunas): com muitas
+// abas abertas cada uma guarda menos, em vez de a RAM crescer sem limite. Abaixo do orçamento vale a preferência do usuário.
+const SCROLLBACK_BUDGET = 100000, SCROLLBACK_FLOOR = 2000; let gcTimer;
+function rebalanceScrollback() {
+  const terminals = [...sessions.values()].filter(item => item.terminal);
+  const each = Math.max(SCROLLBACK_FLOOR, Math.min(state.config.settings.scrollback, Math.floor(SCROLLBACK_BUDGET / Math.max(1, terminals.length))));
+  for (const item of terminals) if (item.terminal.options.scrollback !== each) item.terminal.options.scrollback = each;
+}
+// O Chromium só devolve a memória do terminal fechado quando o coletor roda; força uma coleta depois de fechar sessões.
+function releaseMemory() { clearTimeout(gcTimer); gcTimer = setTimeout(() => { try { window.gc?.(); } catch { /* sem --expose-gc */ } refreshMemory(); }, 3000); }
+async function refreshMemory() {
+  try {
+    const { total, rows } = await call('app:memory'); const by = {}; for (const row of rows) by[row.type] = (by[row.type] || 0) + row.mb;
+    $('memory').textContent = `RAM ${total} MB`; $('memory').title = 'Memória usada pelo aplicativo\n' + Object.entries(by).map(([type, mb]) => `${type}: ${mb} MB`).join('\n');
+  } catch { /* indicador opcional */ }
+}
+setInterval(() => { if (document.hasFocus()) refreshMemory(); }, 15000); setTimeout(refreshMemory, 2000);
 // ---------- Sessão em janela separada (outro monitor) ----------
 // A janela nova é filha desta (mesmo processo, about:blank): o painel da sessão é MOVIDO para lá vivo — a
 // conexão, o terminal e a tela VNC/RDP continuam rodando aqui, sem reconectar. Fechar a janela devolve a sessão.
@@ -1258,7 +1275,7 @@ $('settings').onclick = safe(async () => {
   applySettings();
 });
 $('lock-now').onclick = safe(() => unlockOverlay());
-function applySettings() { const t = state.config.settings.theme; document.body.classList.toggle('light', t === 'light'); for (const name of ['dark', 'dracula', 'nord', 'solarized', 'monokai']) document.body.classList.toggle('t-' + name, t === name); for (const item of sessions.values()) if (item.terminal) { item.terminal.options.fontSize = state.config.settings.fontSize; item.terminal.options.theme = theme(); item.terminal.options.scrollback = state.config.settings.scrollback; } layout(); }
+function applySettings() { const t = state.config.settings.theme; document.body.classList.toggle('light', t === 'light'); for (const name of ['dark', 'dracula', 'nord', 'solarized', 'monokai']) document.body.classList.toggle('t-' + name, t === name); for (const item of sessions.values()) if (item.terminal) { item.terminal.options.fontSize = state.config.settings.fontSize; item.terminal.options.theme = theme(); } rebalanceScrollback(); layout(); }
 $('new-session').onclick = safe(() => sessionForm()); $('welcome-ssh').onclick = safe(() => sessionForm());
 for (const id of ['local-shell', 'add-tab', 'welcome-local']) $(id).onclick = safe(() => openSession(localProfile()));
 $('filter-sessions').oninput = renderProfiles;
