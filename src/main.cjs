@@ -1,4 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, safeStorage, clipboard, protocol, net: electronNet, session, Menu, shell } = require('electron');
+// Janela coberta/em outro monitor não pode ter timers e quadros pausados (VNC em janela separada travava a digitação).
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
@@ -487,7 +490,10 @@ app.whenReady().then(async () => {
       const allowed = graphics?.rdpProxyPort && details.url === `ws://127.0.0.1:${graphics.rdpProxyPort}/`;
       callback({ cancel: !allowed });
     });
-    window = new BrowserWindow({ width: 1440, height: 900, minWidth: 900, minHeight: 600, show: false, backgroundColor: '#0c111b', title: 'Stanis Terminal', icon: path.join(__dirname, 'ui/icon.ico'), webPreferences: { preload: path.join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, spellcheck: false, webviewTag: true } });
+    window = new BrowserWindow({ width: 1440, height: 900, minWidth: 900, minHeight: 600, show: false, backgroundColor: '#0c111b', title: 'Stanis Terminal', icon: path.join(__dirname, 'ui/icon.ico'), webPreferences: { preload: path.join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, spellcheck: false, webviewTag: true, backgroundThrottling: false } });
+    // O noVNC e a fila de teclas do VNC rodam nesta janela mesmo com a sessão numa janela separada: se o Chromium
+    // estrangular os timers/quadros daqui (janela principal atrás ou em outro monitor), a digitação trava e "destrava" ao voltar.
+    window.webContents.setBackgroundThrottling(false);
     Menu.setApplicationMenu(null);
     // Só a janela de sessão destacada (about:blank com nome stanis-popout-…) pode abrir: é o próprio app movendo
     // o painel de uma sessão para outra janela/monitor. Qualquer outro window.open continua negado.
@@ -504,6 +510,7 @@ app.whenReady().then(async () => {
     window.webContents.on('will-attach-webview', guardWebview);
     window.webContents.on('did-create-window', child => {
       child.setMenu(null);
+      child.webContents.setBackgroundThrottling(false);
       child.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
       child.webContents.on('will-navigate', event => event.preventDefault());
       child.webContents.on('will-attach-webview', guardWebview); // aba de Link destacada: mesmas regras
