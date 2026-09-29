@@ -6,7 +6,7 @@ O projeto se inspira no uso de sessões do MobaXterm e do WindTerm. É um aplica
 
 ## Para usar
 
-Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.19.0-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
+Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-1.20.0-win-x64.zip** uma vez para uma pasta local e abra **Stanis Terminal.exe** dentro dela. Mantenha os arquivos juntos; crie um atalho para esse executável. O comando `pnpm build:zip` gera esse pacote em `dist`.
 
 **Evite a versão de arquivo único** (`StanisTerminal-*-win-x64-PORTATIL-LENTO-usar-o-zip.exe`): ela extrai os componentes a cada execução — não só na primeira — e pode levar mais de um minuto toda vez que você abrir. Use-a apenas para testar rapidamente em um computador onde você não vai instalar nada; para uso do dia a dia, use sempre o ZIP extraído. Não precisa instalar Node.js, Python ou Electron em nenhuma das distribuições. Use Windows 10/11 de 64 bits e uma pasta em que você possa salvar arquivos, como Documentos. Consulte os arquivos já publicados em [Releases](https://github.com/TiagoTStanis/StanisTerminal/releases); gerar um pacote local não o publica automaticamente. Para arquivos publicados, confira o SHA-256 e a assinatura GPG do release (veja [como verificar](docs/VERIFICAR-ASSINATURA.md); impressão digital `A345 44C3 43F2 E16B EF64  C7A4 95A1 3721 ED00 B9E6`).
 
@@ -18,6 +18,8 @@ Para abrir rapidamente, use a distribuição em pasta: extraia **StanisTerminal-
 O [manual de uso](docs/LEIA-ME.md) explica backups, X11, atalhos e mensagens comuns. Os [resultados de validação](docs/VALIDACAO.md) separam o que foi testado das conexões que dependem do seu ambiente.
 
 ## Recursos
+
+**Novo na 1.20.0 (janela separada e split escolhido à mão):** o terminal (SSH, Telnet, PowerShell…) parava de receber teclado depois que a janela separada perdia e recuperava o foco — por exemplo, ao trocar de monitor e clicar de volta nela — e só voltava a digitar clicando dentro de novo; o VNC/RDP não sofria disso porque o clique no vídeo já basta. Corrigido: a janela separada agora refoca o terminal sempre que volta a ganhar foco, não só na primeira vez. O **Dividir** (split) escolhia sozinho quais sessões apareciam nos painéis (a ativa + as primeiras abertas); agora cada aba tem um pino (📌, visível com o split ligado) para fixar até 4 sessões nos painéis — sem nenhuma fixada, continua o preenchimento automático de sempre.
 
 **Novo na 1.19.0 — produtividade:** a aba ativa fica visível mesmo com muitas sessões; `Ctrl+Tab` e `Ctrl+Shift+Tab` alternam abas; `Ctrl+Shift+P` busca sessões abertas. O modo foco mantém a barra de abas. A barra do VNC/RDP fica fixa sem cobrir o desktop, com opção de ocultação automática. Corrigidos o botão Colar texto, o retorno de janelas web e o foco ao alternar sessões. O clipboard remoto só atualiza o Windows pela sessão em uso. Veja [correções, uso e limites da validação](docs/PRODUTIVIDADE-1.19.0.md).
 
