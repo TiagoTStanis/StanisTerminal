@@ -88,6 +88,7 @@ function labSite(IDLE_MS) {
     const popWin = await opened; await popWin.waitForLoadState();
     await popWin.waitForFunction(() => /LOGADO/.test(document.title), null, { timeout: 15000 });
     assert.equal(await page.locator('.pane webview').count(), 1, 'a página saiu da aba (fica só a de largura)');
+    await page.locator('#dock-all').waitFor({ state: 'visible', timeout: 8000 }); // aparece um instante depois da janela carregar
     assert.ok(await page.locator('#dock-all').isVisible(), 'botão "Trazer janelas" aparece');
     await popWin.close();
     await page.waitForFunction(() => document.querySelectorAll('.pane webview').length === 2, null, { timeout: 10000 });

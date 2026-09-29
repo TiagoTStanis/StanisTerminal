@@ -197,7 +197,7 @@ function register() {
     const clean = {};
     for (const [id, entry] of Object.entries(value).slice(0, 500)) {
       if (!/^[a-zA-Z0-9-]{1,80}$/.test(id) || !entry || !Array.isArray(entry.runs)) continue;
-      const line = v => typeof v === 'string' && v.length <= 300 && !/[ -]/.test(v);
+      const line = v => typeof v === 'string' && v.length <= 300 && !/[\x00-\x1f]/.test(v);
       clean[id] = { snooze: Math.max(0, Math.min(50, Number(entry.snooze) || 0)), never: !!entry.never,
         runs: entry.runs.slice(-3).map(run => ({ steps: (Array.isArray(run.steps) ? run.steps : []).slice(0, 8).filter(s => line(s?.cmd)).map(s => ({ cmd: s.cmd, prompt: line(s.prompt) ? s.prompt : '' })) })) };
     }
