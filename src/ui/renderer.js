@@ -26,6 +26,7 @@ const $ = id => document.getElementById(id);
 const api = window.api;
 const call = (name, ...args) => api.call(name, ...args);
 let state, activeId, split = false, toastTimer, editor = null, extras = null;
+const splitPicks = new Set(); // sessões fixadas manualmente nos painéis do split (até 4, na ordem escolhida)
 const sessions = new Map();
 const fileState = { kind: 'local', id: '', path: '', parent: '', network: false };
 const dialogQueue = [];
@@ -769,7 +770,7 @@ async function closeSession(id, force = false) {
     try { item.webview?.remove(); } catch { /* conteúdo já descartado */ }
   } else await call(item.graphical ? 'graphics:close' : 'terminal:close', id);
   item.closing = true; try { item.popout?.close(); } catch { /* já fechada */ } item.popout = null;
-  clearInterval(item.clipboardTimer); if (item.tightId) call('files:tightClose', item.tightId).catch(() => {}); item.rfb?.disconnect(); try { item.rdpSession?.shutdown(); } catch { /* já encerrada */ } item.terminal?.dispose(); item.pane.remove(); sessions.delete(id);
+  clearInterval(item.clipboardTimer); if (item.tightId) call('files:tightClose', item.tightId).catch(() => {}); item.rfb?.disconnect(); try { item.rdpSession?.shutdown(); } catch { /* já encerrada */ } item.terminal?.dispose(); item.pane.remove(); sessions.delete(id); splitPicks.delete(id);
   if (activeId === id) activeId = [...sessions.values()].filter(other => !other.popout).at(-1)?.id;
   layout(); focusSession(current()); scheduleSaveOpen();
 }
@@ -797,6 +798,10 @@ function popOut(item, at = null) {
   doc.addEventListener('mousemove', event => item.pane.classList.toggle('show-bar', event.clientY < 48), true);
   doc.addEventListener('mouseleave', () => item.pane.classList.remove('show-bar'));
   child.addEventListener('resize', refit); refit();
+  // Sem isto, o terminal só recebe teclado de novo se você clicar dentro dele depois de a janela
+  // separada perder e recuperar o foco (trocar de monitor, alternar janelas). O VNC não sofre isso
+  // porque o clique no canvas já foca; o xterm.js depende de focar a textarea escondida dele.
+  child.addEventListener('focus', () => item.terminal?.focus());
   // O noVNC "captura" o mouse com uma camada no documento principal e só a solta quando o botão é solto aqui;
   // soltando na janela separada, a camada ficava e a janela principal parava de aceitar cliques.
   for (const type of ['mouseup', 'pointerup', 'blur']) child.addEventListener(type, () => setTimeout(releaseCapture, 0), true);
@@ -847,7 +852,7 @@ document.querySelector('.toolbar-actions').prepend(dockButton);
 
 function renderTabs() {
   dockButton.hidden = ![...sessions.values()].some(item => item.popout);
-  const signature = JSON.stringify([...sessions.values()].map(item => [item.id, item.name, item.ended, !!item.popout]));
+  const signature = JSON.stringify([...sessions.values()].map(item => [item.id, item.name, item.ended, !!item.popout, splitPicks.has(item.id)])) + '|' + split;
   const rebuild = $('tabs').dataset.signature !== signature;
   if (rebuild) { $('tabs').replaceChildren(); $('tabs').dataset.signature = signature; }
   for (const item of sessions.values()) {
@@ -868,6 +873,17 @@ function renderTabs() {
         const inside = event.screenX >= window.screenX && event.screenX <= window.screenX + window.outerWidth && event.screenY >= window.screenY && event.screenY <= window.screenY + window.outerHeight;
         if (!inside && (event.screenX || event.screenY)) safe(() => popOut(item, { x: event.screenX, y: event.screenY }))();
       };
+    }
+    if (split && !item.popout) {
+      const pinned = splitPicks.has(item.id);
+      const pin = button('📌', event => {
+        event.stopPropagation();
+        if (splitPicks.has(item.id)) splitPicks.delete(item.id);
+        else { if (splitPicks.size >= 4) { toast('Só 4 painéis por vez — tire um antes de escolher outro.'); return; } splitPicks.add(item.id); }
+        layout();
+      }, 'tab-pin' + (pinned ? ' on' : ''));
+      pin.title = pinned ? 'Tirar deste painel do split' : 'Fixar neste painel do split (até 4)'; pin.setAttribute('aria-pressed', String(pinned));
+      tab.append(pin);
     }
     const close = button('✕', event => { event.stopPropagation(); return closeSession(item.id); }); close.title = 'Fechar sessão'; tab.append(close);
     tab.onclick = event => { if (event.target.closest('button')) return; focusSession(item); }; $('tabs').append(tab);
@@ -951,7 +967,10 @@ function layout() {
   document.body.classList.toggle('no-sessions', sessions.size === 0);
 
   // Sessões em janela separada ficam fora da divisão e das abas visíveis daqui.
-  const ids = [...sessions.values()].filter(item => !item.popout).map(item => item.id); const selected = split ? [activeId, ...ids.filter(id => id !== activeId)].filter(id => ids.includes(id)).slice(0, 4) : [activeId];
+  const ids = [...sessions.values()].filter(item => !item.popout).map(item => item.id);
+  const picks = [...splitPicks].filter(id => ids.includes(id));
+  // Com painéis fixados (📌), o split mostra exatamente esses; sem nenhum, cai no preenchimento automático de sempre.
+  const selected = !split ? [activeId] : picks.length ? picks.slice(0, 4) : [activeId, ...ids.filter(id => id !== activeId)].filter(id => ids.includes(id)).slice(0, 4);
   $('panes').classList.toggle('split', split && sessions.size > 1); $('panes').classList.toggle('many', split && selected.length > 2);
   for (const item of sessions.values()) if (!item.popout) item.pane.hidden = !selected.includes(item.id);
   const empty = document.querySelector('.panes-empty'); if (empty) empty.hidden = !(sessions.size && !ids.length);
