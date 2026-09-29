@@ -38,16 +38,86 @@ export function setup(ctx) {
       if (ch === '\r' || ch === '\n') {
         const line = (item.line || '').trim();
         if (line && !item.lineDirty && !item.lineSensitive) {
-          live.history = live.history.filter(x => x !== line).concat(line).slice(-2000); saveHistory();
+          live.history = live.history.filter(x => x !== line).concat(line).slice(-2000); saveHistory(); learnStep(item, line);
           if (live.recording) live.recording.steps.push({ text: line, delay: Math.min(10000, Date.now() - live.recording.last) }), live.recording.last = Date.now();
-        } else if (live.recording && item.lineSensitive) toast('Entrada de senha ignorada na gravação da macro.');
-        item.line = ''; item.lineDirty = false; item.lineSensitive = false;
-      } else if (ch === '\x7f' || ch === '\b') item.line = (item.line || '').slice(0, -1);
+        } else { if ((line || item.lineDirty) && item.learn) item.learn.stopped = true; if (live.recording && item.lineSensitive) toast('Entrada de senha ignorada na gravação da macro.'); }
+        item.line = ''; item.lineDirty = false; item.lineSensitive = false; item.tabbed = false;
+      } else if (ch === '\t') item.tabbed = true;
+      else if (ch === '\x7f' || ch === '\b') item.line = (item.line || '').slice(0, -1);
       else if (ch === '\x03' || ch === '\x15' || ch === '\x04') { item.line = ''; item.lineDirty = false; }
       else if (ch === '\x1b') item.lineDirty = true;
-      else if (ch >= ' ' && !item.lineDirty) { if (!item.line) item.lineSensitive = sensitive(item); item.line = (item.line || '') + ch; }
+      else if (ch >= ' ' && !item.lineDirty) { if (!item.line) { item.lineSensitive = sensitive(item); item.promptSnap = promptOf(item); } item.line = (item.line || '') + ch; }
     }
     if (item.terminal) renderSuggest(item);
+  }
+  // ---------- Aprende com login: repetição determinística, sem IA ----------
+  // Por sessão salva, guarda os primeiros comandos digitados depois de conectar nas últimas 3 conexões. Se as 3 começam
+  // com a mesma sequência, oferece rodá-la sozinha ao conectar, como script send/expect (o mesmo Lua da tela Scripts).
+  const LEARN_RUNS = 3, LEARN_MAX_STEPS = 8, LEARN_SNOOZE = 5;
+  const SECRET = /(^|\s)(-p\S+|--?pass(word|wd)?\b|--?(token|secret)\b|sshpass)|(pass(word|wd)?|senha|secret|token|api[_-]?key|bearer|authorization)\s*[=:]|\/\/[^\s/:@]+:[^\s/@]+@/i;
+  let learn = {}, learnTimer;
+  call('learn:load').then(value => { if (value && typeof value === 'object') learn = value; }).catch(() => {});
+  const saveLearn = () => { clearTimeout(learnTimer); learnTimer = setTimeout(() => safe(() => call('learn:save', learn))(), 800); };
+  const promptOf = item => { const last = (item.tail || '').split('\n').pop().trimEnd().slice(-10); return /^[\x20-\x7e]+$/.test(last) ? last : ''; };
+  const learnProfile = item => state().config.settings.learnLogin !== false && item.profile?.id && item.profile.type !== 'local' ? state().config.profiles.find(p => p.id === item.profile.id) : null;
+  function learnStart(item) {
+    const profile = learnProfile(item); if (!profile) return;
+    const entry = learn[profile.id] ??= { runs: [], snooze: 0, never: false };
+    if (entry.snooze > 0) entry.snooze--;
+    entry.runs = [...entry.runs, { steps: [] }].slice(-LEARN_RUNS); item.learn = { entry, run: entry.runs.at(-1), stopped: false, asked: false }; saveLearn();
+  }
+  function learnStep(item, line) {
+    const current = item.learn; if (!current || current.stopped) return;
+    if (item.tabbed || SECRET.test(line) || line.length > 300 || current.run.steps.length >= LEARN_MAX_STEPS) { current.stopped = true; return; }
+    current.run.steps.push({ cmd: line, prompt: item.promptSnap || '' }); saveLearn(); learnCheck(item);
+  }
+  // Prefixo comum das duas conexões anteriores; quando a conexão atual o confirma inteiro (ou diverge dele), decide na hora.
+  function learnCheck(item) {
+    const { entry, run, asked } = item.learn; if (asked || entry.never || entry.snooze > 0 || entry.runs.length < LEARN_RUNS) return;
+    const [a, b] = entry.runs.slice(-LEARN_RUNS, -1).map(r => r.steps), prefix = [];
+    for (let i = 0; i < Math.min(a.length, b.length) && a[i].cmd === b[i].cmd; i++) prefix.push(a[i]);
+    if (!prefix.length) return;
+    let same = 0; while (same < prefix.length && run.steps[same]?.cmd === prefix[same].cmd) same++;
+    if (!same || (same < prefix.length && run.steps.length <= same)) return; // sem prefixo em comum, ou a conexão atual ainda pode confirmar o resto
+    item.learn.asked = true; safe(() => learnOffer(item, run.steps.slice(0, same)))();
+  }
+  const lua = value => "'" + value.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
+  function learnScript(steps, runs, existing) {
+    const lines = existing ? [existing.trimEnd(), ''] : [];
+    lines.push('-- Login automático aprendido pela repetição (sem IA). Edite ou apague à vontade.');
+    steps.forEach((step, i) => {
+      const stable = step.prompt && runs.every(r => r.steps[i]?.prompt === step.prompt);
+      lines.push(stable ? `expect(${lua(step.prompt)}, 15000)` : 'wait(1000)', `sendln(${lua(step.cmd)})`);
+    });
+    return lines.join('\n') + '\n';
+  }
+  async function learnOffer(item, steps) {
+    const profile = learnProfile(item); if (!profile) return; const entry = item.learn.entry;
+    const answer = await form({ title: 'Automatizar o login?', message: `Você digitou os mesmos comandos nas últimas ${LEARN_RUNS} conexões a “${profile.name}”. Quer que eu rode isso automaticamente ao conectar? Fica só neste computador, sem IA e sem rede; você vê, edita ou apaga em Editar sessão → Avançados.`, fields: [
+      { name: 'choice', label: 'O que fazer', wide: true, options: [{ value: 'yes', label: 'Sim, rodar automaticamente ao conectar' }, { value: 'later', label: `Agora não (só pergunto de novo depois de ${LEARN_SNOOZE} conexões)` }, { value: 'never', label: 'Nunca perguntar para esta sessão' }] },
+      { name: 'code', label: 'Script (pode editar antes de salvar)', type: 'textarea', value: learnScript(steps, entry.runs, profile.loginScript), wide: true }], accept: 'Confirmar' });
+    if (answer?.choice === 'yes') {
+      const saved = await call('profile:save', { ...profile, loginScript: answer.code });
+      state().config.profiles = state().config.profiles.filter(p => p.id !== saved.id).concat(saved); entry.runs = []; entry.snooze = 0; ctx.refresh(); toast('Login automático salvo. Ele roda sozinho ao conectar.');
+    } else if (answer?.choice === 'never') entry.never = true;
+    else entry.snooze = LEARN_SNOOZE;
+    saveLearn();
+  }
+  // Roda o script de login do perfil ao conectar. O expect olha a saída desde a conexão (o prompt pode já ter chegado) e
+  // cada comando enviado zera o buffer, então a espera seguinte só enxerga a resposta dele.
+  async function loginRun(item) {
+    const profile = state().config.profiles.find(p => p.id === item.profile?.id), code = profile?.loginScript; if (!code || !item.terminal) return;
+    const controller = new AbortController(); item.loginAbort = controller; toast(`Login automático: ${profile.name}`);
+    const api = {
+      send: text => { if (item.ended) return Promise.reject(new Error('A sessão terminou.')); item.buf = ''; return call('terminal:write', item.id, text); },
+      expect: (text, timeout) => new Promise(resolve => {
+        if ((item.buf || '').includes(text)) return resolve(true);
+        item.waiters ||= new Set(); const waiter = { text, resolve }; item.waiters.add(waiter);
+        setTimeout(() => { if (item.waiters.delete(waiter)) resolve(false); }, timeout);
+      }),
+      log: message => toast(`[login] ${message}`)
+    };
+    try { await runLua(code, api, controller.signal); } catch (error) { if (!item.ended) toast(`Login automático interrompido: ${error.message}`); } finally { item.loginAbort = null; }
   }
   // Guarda o fim da saída sem sequências de controle para reconhecer pedidos de senha.
   function output(item, data) {
@@ -290,5 +360,5 @@ export function setup(ctx) {
   }
   if (byName.size) grid.append(elem('h3', 'Outras', 'tool-group'), ...byName.values());
 
-  return { attach, input, output, key, renderSuggest, downloadFolder: entry => ctx.downloadFolder(entry), fileMode: kind => ctx.setFileMode(kind) };
+  return { attach, input, output, key, learnStart, loginRun, renderSuggest, downloadFolder: entry => ctx.downloadFolder(entry), fileMode: kind => ctx.setFileMode(kind) };
 }

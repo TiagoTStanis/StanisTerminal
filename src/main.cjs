@@ -133,6 +133,7 @@ function register() {
     config.value.settings = { fontSize: Math.max(10, Math.min(28, Number(value.fontSize) || 14)), theme: THEMES.includes(value.theme) ? value.theme : 'light', restoreSessions: value.restoreSessions === undefined ? previous.restoreSessions === true : !!value.restoreSessions, scrollback: Math.max(1000, Math.min(100000, Number(value.scrollback) || 10000)),
       syncFolder: value.syncFolder === undefined ? previous.syncFolder || '' : text(value.syncFolder || '', 2048), autocomplete: value.autocomplete === undefined ? previous.autocomplete !== false : !!value.autocomplete,
       highlightErrors: value.highlightErrors === undefined ? previous.highlightErrors !== false : !!value.highlightErrors,
+      learnLogin: value.learnLogin === undefined ? previous.learnLogin !== false : !!value.learnLogin,
       checkOnline: value.checkOnline === undefined ? previous.checkOnline !== false : !!value.checkOnline,
       webNotifications: value.webNotifications === undefined ? previous.webNotifications === true : !!value.webNotifications,
       webNotificationPermissions: previous.webNotificationPermissions && typeof previous.webNotificationPermissions === 'object' ? previous.webNotificationPermissions : {},
@@ -188,6 +189,19 @@ function register() {
     if (!Array.isArray(values)) throw new Error('Histórico inválido.');
     const clean = [...new Set(values.filter(v => typeof v === 'string' && v.length < 2000 && !/[\x00-\x1f]/.test(v)))].slice(-2000);
     writeJSON(path.join(config.directory, 'history.json'), clean); return clean;
+  });
+  // Aprende com login: últimos comandos digitados após conectar, por perfil. Só repetição, sem IA e sem rede.
+  handle('learn:load', () => readJSON(path.join(config.directory, 'learn.json'), {}));
+  handle('learn:save', value => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Dados inválidos.');
+    const clean = {};
+    for (const [id, entry] of Object.entries(value).slice(0, 500)) {
+      if (!/^[a-zA-Z0-9-]{1,80}$/.test(id) || !entry || !Array.isArray(entry.runs)) continue;
+      const line = v => typeof v === 'string' && v.length <= 300 && !/[ -]/.test(v);
+      clean[id] = { snooze: Math.max(0, Math.min(50, Number(entry.snooze) || 0)), never: !!entry.never,
+        runs: entry.runs.slice(-3).map(run => ({ steps: (Array.isArray(run.steps) ? run.steps : []).slice(0, 8).filter(s => line(s?.cmd)).map(s => ({ cmd: s.cmd, prompt: line(s.prompt) ? s.prompt : '' })) })) };
+    }
+    writeJSON(path.join(config.directory, 'learn.json'), clean); return clean;
   });
   // Sincronização por pasta: aponte para OneDrive, Dropbox, Syncthing ou um repositório Git local. Nunca inclui senhas.
   handle('sync:push', () => {
