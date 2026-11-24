@@ -545,23 +545,36 @@ app.on('window-all-closed', () => app.quit());
 // ---------- Navegador das sessões Link ----------
 const WEB_PARTITION = 'persist:stanis-web';
 const trustedPopupHost = value => { try { const u = new URL(value), h = u.hostname.toLowerCase(); return u.protocol === 'https:' && (h === 'cruzeirodosul.edu.br' || h.endsWith('.cruzeirodosul.edu.br')); } catch { return false; } };
+// Diagnóstico de popups das abas de Link: cada window.open() vira uma linha em popup-debug.log (pasta de dados) e no console.
+const POPUP_BUILD = 'popup-debug-1.22.2';
+const popupLog = (...parts) => {
+  const line = `${new Date().toISOString()} [${POPUP_BUILD}] ${parts.map(p => typeof p === 'string' ? p : JSON.stringify(p)).join(' ')}`;
+  console.log(line);
+  try { if (config?.directory) fs.appendFileSync(path.join(config.directory, 'popup-debug.log'), line + '\n'); } catch {}
+};
 app.on('web-contents-created', (_, contents) => {
   if (contents.getType() !== 'webview') return;
+  popupLog('webview criado', { id: contents.id });
+  // F12 abre o DevTools desta aba de Link (janela separada).
+  contents.on('before-input-event', (event, input) => { if (input.type === 'keyDown' && input.key === 'F12') { event.preventDefault(); contents.openDevTools({ mode: 'detach' }); } });
   const web = url => /^https?:\/\//i.test(url);
   // Links que abririam outra janela (target=_blank) abrem na própria aba; esquemas estranhos são barrados.
   // Popups de script (window.open): com "popups: permitir" nas configurações do site abrem de verdade, numa janela
   // no mesmo perfil e com as mesmas regras; sem isso, seguem abrindo na própria aba e a barra mostra "popup bloqueado".
-  contents.setWindowOpenHandler(({ url, disposition }) => {
+  contents.setWindowOpenHandler(({ url, disposition, frameName, features }) => {
+    const decision = result => { popupLog('window.open', { from: contents.getURL(), url, frameName, features, disposition, action: result.action }); return result; };
     const site = originOf(contents.getURL());
     // O portal da faculdade (*.cruzeirodosul.edu.br) testa window.open() e, se vier null, trava com um alert de
     // "desabilite o bloqueador de pop-ups": por padrão libera popups desse domínio, salvo se o usuário bloqueou o site.
     const state = site ? SitePerms.stateOf(config?.value.settings, site, 'popups') : 'ask';
-    if (web(url) && (site && state === 'allow' || state === 'ask' && trustedPopupHost(contents.getURL()) && trustedPopupHost(url))) {
-      return { action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true, backgroundColor: '#ffffff', icon: path.join(__dirname, 'ui/icon.ico'), webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false } } };
+    // Sites costumam testar o bloqueador com window.open('') / 'about:blank' e só depois navegar a janela.
+    const blank = !url || url === 'about:blank';
+    if ((web(url) || blank) && (site && state === 'allow' || state === 'ask' && trustedPopupHost(contents.getURL()) && (blank || trustedPopupHost(url)))) {
+      return decision({ action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true, backgroundColor: '#ffffff', icon: path.join(__dirname, 'ui/icon.ico'), webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false } } });
     }
     if (web(url)) contents.loadURL(url);
     if (disposition === 'new-window' && site && SitePerms.stateOf(config?.value.settings, site, 'popups') !== 'block') emit('web:popupBlocked', { id: contents.id, url, origin: site });
-    return { action: 'deny' };
+    return decision({ action: 'deny' });
   });
   contents.on('did-create-window', child => {
     child.setMenu(null);
