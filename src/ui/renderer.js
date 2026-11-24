@@ -198,13 +198,16 @@ function openWebSession(profile) {
     if (on) item.keepTimer = setInterval(() => safe(() => keepAlive(item))(), (profile.keepAliveMinutes || 4) * 60000);
   };
   const bar = elem('div', '', 'graphic-toolbar web-toolbar');
+  const siteButton = button('🔒', () => openWebSiteSettings(item)); siteButton.title = 'Configurações do site: permissões, popups e dados';
+  item.popupButton = button('🚫 Popup bloqueado', () => openWebPopupMenu(item)); item.popupButton.hidden = true;
+  const openExternal = button('🌐 Navegador', () => call('links:openProfile', profile.id)); openExternal.title = 'Abrir no navegador padrão (fora do app)';
   bar.append(
     button('←', () => item.webview.canGoBack() && item.webview.goBack()), button('→', () => item.webview.canGoForward() && item.webview.goForward()), button('↻', () => item.webview.reload()),
-    address, (item.zoomButton = button('', () => openWebZoomMenu(item))), keepButton,
-    button('🌐 Navegador', () => call('links:openProfile', profile.id)),
+    siteButton, address, item.popupButton, (item.zoomButton = button('', () => openWebZoomMenu(item))), keepButton,
+    openExternal,
     fullscreenButton(item.pane)
   );
-  bar.children[0].title = 'Voltar'; bar.children[1].title = 'Avançar'; bar.children[2].title = 'Recarregar'; bar.children[5].title = 'Abrir no navegador padrão (fora do app)';
+  bar.children[0].title = 'Voltar'; bar.children[1].title = 'Avançar'; bar.children[2].title = 'Recarregar';
   item.pane.append(bar); item.setKeepAlive = setKeepAlive; setKeepAlive(profile.keepAlive !== false);
   item.address = address;
   try { const saved = localStorage.getItem('web-zoom:' + profile.id); item.webZoom = saved ? (/^(auto|w\d+)$/.test(saved) ? saved : Number(saved) || 'auto') : 'auto'; } catch { item.webZoom = 'auto'; }
@@ -260,6 +263,35 @@ function openWebZoomMenu(item) {
     ...WEB_ZOOMS.map(z => option(z, z === 1 ? '100% (tamanho real)' : `${Math.round(z * 100)}%`)),
   ]);
 }
+// ---------- Configurações do site (estilo Chrome) ----------
+const SITE_STATES = [{ value: 'ask', label: 'Perguntar' }, { value: 'allow', label: 'Permitir' }, { value: 'block', label: 'Bloquear' }];
+function webOrigin(item) { try { const u = new URL(item.webview?.getURL() || item.profile.url); return /^https?:$/.test(u.protocol) ? u.origin : null; } catch { return null; } }
+async function openWebSiteSettings(item) {
+  const origin = webOrigin(item); if (!origin) return toast('Esta página não tem configurações de site.');
+  const info = await call('web:site:get', origin); if (!info) return toast('Esta página não tem configurações de site.');
+  const fields = [
+    ...info.items.map(p => ({ name: p.key, label: p.label, value: p.state, options: SITE_STATES })),
+    { name: 'clearData', label: 'Limpar cookies e dados deste site (desloga a conta)', type: 'checkbox', value: false, wide: true },
+    { name: 'reset', label: 'Redefinir todas as permissões deste site para "Perguntar"', type: 'checkbox', value: false, wide: true },
+  ];
+  const values = await form({ title: `Configurações do site\n${info.origin}`, message: 'Cada permissão pode ficar em Perguntar (aviso na hora), Permitir ou Bloquear. Dá para mudar a qualquer momento.', fields, accept: 'Salvar' });
+  if (!values) return;
+  if (values.reset) await call('web:site:reset', origin);
+  else for (const p of info.items) if (values[p.key] !== p.state) await call('web:site:set', origin, p.key, values[p.key]);
+  if (values.clearData) { await call('web:site:clearData', origin); toast('Dados do site apagados. Recarregue a página.'); } else toast('Configurações do site salvas. Recarregue a página para valer nela.');
+}
+function openWebPopupMenu(item) {
+  const box = item.popupButton.getBoundingClientRect(), origin = item.popupOrigin;
+  tree?.openMenu(box.left, box.bottom + 4, [
+    { label: `Sempre permitir popups de ${origin}`, action: async () => { await call('web:site:set', origin, 'popups', 'allow'); item.popupButton.hidden = true; toast('Popups liberados para este site. Repita a ação na página.'); } },
+    { label: 'Continuar bloqueando', action: async () => { await call('web:site:set', origin, 'popups', 'block'); item.popupButton.hidden = true; } },
+  ]);
+}
+api.on('web:popupBlocked', ({ id, origin }) => {
+  const item = [...sessions.values()].find(s => { try { return s.webview?.getWebContentsId() === id; } catch { return false; } });
+  if (!item?.popupButton) return;
+  item.popupOrigin = origin; item.popupButton.hidden = false; item.popupButton.title = 'Esta página tentou abrir um popup. Clique para liberar ou manter bloqueado.';
+});
 // Ctrl + roda / Ctrl +/−/0 dentro da página (repassados pelo processo principal).
 api.on('web:zoom', ({ id, step }) => {
   const item = [...sessions.values()].find(s => { try { return s.webview?.getWebContentsId() === id; } catch { return false; } });

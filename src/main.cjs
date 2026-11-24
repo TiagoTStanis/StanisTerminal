@@ -28,6 +28,7 @@ const { execFile } = require('node:child_process');
 const { startVnc, cleanupStale } = require('./vncserver.cjs');
 const { SerialPort } = require('serialport');
 const { originOf, isGranted, remember } = require('./web-notifications.cjs');
+const SitePerms = require('./web-site-permissions.cjs');
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'stanis', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
 const testMode = process.argv.includes('--test-mode');
@@ -140,10 +141,11 @@ function register() {
       checkOnline: value.checkOnline === undefined ? previous.checkOnline !== false : !!value.checkOnline,
       webNotifications: value.webNotifications === undefined ? previous.webNotifications === true : !!value.webNotifications,
       webNotificationPermissions: previous.webNotificationPermissions && typeof previous.webNotificationPermissions === 'object' ? previous.webNotificationPermissions : {},
+      webSitePermissions: previous.webSitePermissions && typeof previous.webSitePermissions === 'object' ? previous.webSitePermissions : {},
       highlightSet: ['network', 'general'].includes(value.highlightSet) ? value.highlightSet : previous.highlightSet || 'network' };
     config.save(); return config.value.settings;
   });
-  handle('settings:notifications:reset', () => { config.value.settings.webNotificationPermissions = {}; config.save(); return true; });
+  handle('settings:notifications:reset', () => { config.value.settings.webNotificationPermissions = {}; config.value.settings.webSitePermissions = {}; config.save(); return true; });
   handle('macros:save', values => {
     if (!Array.isArray(values) || values.length > 100) throw new Error('Limite de 100 macros.');
     config.value.macros = values.map(v => {
@@ -546,7 +548,22 @@ app.on('web-contents-created', (_, contents) => {
   if (contents.getType() !== 'webview') return;
   const web = url => /^https?:\/\//i.test(url);
   // Links que abririam outra janela (target=_blank) abrem na própria aba; esquemas estranhos são barrados.
-  contents.setWindowOpenHandler(({ url }) => { if (web(url)) contents.loadURL(url); return { action: 'deny' }; });
+  // Popups de script (window.open): com "popups: permitir" nas configurações do site abrem de verdade, numa janela
+  // no mesmo perfil e com as mesmas regras; sem isso, seguem abrindo na própria aba e a barra mostra "popup bloqueado".
+  contents.setWindowOpenHandler(({ url, disposition }) => {
+    const site = originOf(contents.getURL());
+    if (web(url) && site && SitePerms.stateOf(config?.value.settings, site, 'popups') === 'allow') {
+      return { action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true, backgroundColor: '#ffffff', icon: path.join(__dirname, 'ui/icon.ico'), webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false } } };
+    }
+    if (web(url)) contents.loadURL(url);
+    if (disposition === 'new-window' && site && SitePerms.stateOf(config?.value.settings, site, 'popups') !== 'block') emit('web:popupBlocked', { id: contents.id, url, origin: site });
+    return { action: 'deny' };
+  });
+  contents.on('did-create-window', child => {
+    child.setMenu(null);
+    child.webContents.setWindowOpenHandler(({ url }) => { if (web(url)) child.webContents.loadURL(url); return { action: 'deny' }; });
+    child.webContents.on('will-navigate', (event, url) => { if (!web(url)) event.preventDefault(); });
+  });
   contents.on('will-navigate', (event, url) => { if (!web(url)) event.preventDefault(); });
   // Zoom da página (Ctrl + roda, Ctrl +/-/0): quem aplica é a aba, que guarda a escolha da sessão.
   contents.on('zoom-changed', (_, direction) => emit('web:zoom', { id: contents.id, step: direction === 'in' ? 1 : -1 }));
@@ -567,9 +584,37 @@ app.whenReady().then(() => {
   const web = session.fromPartition(WEB_PARTITION);
   const notificationPrompts = new Map();
   const granted = origin => isGranted(config?.value.settings, origin);
-  web.setPermissionCheckHandler((_, permission, origin) => permission === 'notifications' ? granted(originOf(origin)) : ['fullscreen', 'clipboard-sanitized-write'].includes(permission));
+  web.setPermissionCheckHandler((_, permission, origin, details) => {
+    if (permission === 'notifications') return granted(originOf(origin));
+    if (SitePerms.ALWAYS.includes(permission)) return true;
+    const keys = SitePerms.keysFor(permission, { mediaTypes: details?.mediaType ? [details.mediaType] : [] }), site = originOf(origin);
+    return !!keys && !!site && keys.every(key => SitePerms.stateOf(config?.value.settings, site, key) === 'allow');
+  });
+  const sitePrompts = new Map();
   web.setPermissionRequestHandler((contents, permission, callback, details) => {
-    if (permission !== 'notifications') { callback(['fullscreen', 'clipboard-sanitized-write'].includes(permission)); return; }
+    if (permission !== 'notifications') {
+      if (SitePerms.ALWAYS.includes(permission)) { callback(true); return; }
+      // Estilo Chrome: regra salva vale; sem regra, pergunta ("sempre", "desta vez" ou bloquear) e lembra se for "sempre".
+      const keys = SitePerms.keysFor(permission, details), site = originOf(details.requestingUrl);
+      if (!keys || !site || !details.isMainFrame || !window || window.isDestroyed()) { callback(false); return; }
+      const states = keys.map(key => SitePerms.stateOf(config.value.settings, site, key));
+      if (states.includes('block')) { callback(false); return; }
+      if (states.every(s => s === 'allow')) { callback(true); return; }
+      const promptKey = site + '|' + keys.join(',');
+      let prompt = sitePrompts.get(promptKey);
+      if (!prompt) {
+        const names = keys.map(key => SitePerms.LABELS[key].toLowerCase()).join(' e ');
+        prompt = dialog.showMessageBox(window, { type: 'question', title: 'Permissão do site', message: `${site} quer usar: ${names}.`, detail: 'Você pode mudar isso depois no cadeado 🔒 da barra da aba.', buttons: ['Permitir sempre', 'Permitir desta vez', 'Bloquear'], defaultId: 2, cancelId: 2 }).then(result => {
+          if (result.response === 0) for (const key of keys) SitePerms.setState(config.value.settings, site, key, 'allow');
+          else if (result.response === 2) for (const key of keys) SitePerms.setState(config.value.settings, site, key, 'block');
+          if (result.response !== 1) config.save();
+          return result.response !== 2;
+        }).catch(() => false).finally(() => sitePrompts.delete(promptKey));
+        sitePrompts.set(promptKey, prompt);
+      }
+      prompt.then(allow => callback(!!allow)).catch(() => callback(false));
+      return;
+    }
     const origin = originOf(details.requestingUrl);
     if (!origin || !details.isMainFrame || config.value.settings.webNotifications !== true) { callback(false); return; }
     const saved = config.value.settings.webNotificationPermissions?.[origin];
@@ -656,6 +701,14 @@ function openWebPopout(options) {
   win.loadURL(url);
   return true;
 }
+handle('web:site:get', origin => { const site = originOf(text(origin, 2048)); return site ? { origin: site, items: SitePerms.snapshot(config.value.settings, site) } : null; });
+handle('web:site:set', (origin, key, value) => { const ok = SitePerms.setState(config.value.settings, text(origin, 2048), text(key, 40), text(value, 10)); if (ok) config.save(); return ok; });
+handle('web:site:reset', origin => { const ok = SitePerms.resetSite(config.value.settings, text(origin, 2048)); if (ok) config.save(); return ok; });
+handle('web:site:clearData', async origin => {
+  const site = originOf(text(origin, 2048)); if (!site) return false;
+  await session.fromPartition(WEB_PARTITION).clearStorageData({ origin: site });
+  return true;
+});
 handle('web:popout', options => openWebPopout(options));
 handle('web:dock', id => { webPopouts.get(text(id, 120))?.win.close(); return true; });
 handle('web:focus', id => { const entry = webPopouts.get(text(id, 120)); if (entry) { if (entry.win.isMinimized()) entry.win.restore(); entry.win.focus(); } return !!entry; });
