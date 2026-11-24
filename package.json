@@ -1,6 +1,6 @@
 {
   "name": "stanis-terminal",
-  "version": "1.22.0",
+  "version": "1.22.1",
   "description": "Terminal local para Windows, sem IA, com sessões e ferramentas de infraestrutura.",
   "main": "src/main.cjs",
   "author": "Tiago Torres Stanis",
@@ -26,7 +26,7 @@
     "test:tightui": "node --openssl-legacy-provider tests/tightvnc-ui.cjs",
     "test:windows": "node --openssl-legacy-provider tests/popout-ui.cjs",
     "test:popout-focus": "node --openssl-legacy-provider tests/popout-terminal-focus.cjs",
-    "test:web": "node tests/weblink-ui.cjs",
+    "test:web": "node tests/weblink-ui.cjs && node tests/weblink-popup.cjs",
     "test:panel": "node tests/panel-ui.cjs",
     "test:memory": "node tests/memory-ui.cjs",
     "test:login": "node tests/login-learn-ui.cjs",

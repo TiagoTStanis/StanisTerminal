@@ -544,6 +544,7 @@ app.on('window-all-closed', () => app.quit());
 
 // ---------- Navegador das sessões Link ----------
 const WEB_PARTITION = 'persist:stanis-web';
+const trustedPopupHost = value => { try { const u = new URL(value), h = u.hostname.toLowerCase(); return u.protocol === 'https:' && (h === 'cruzeirodosul.edu.br' || h.endsWith('.cruzeirodosul.edu.br')); } catch { return false; } };
 app.on('web-contents-created', (_, contents) => {
   if (contents.getType() !== 'webview') return;
   const web = url => /^https?:\/\//i.test(url);
@@ -552,7 +553,10 @@ app.on('web-contents-created', (_, contents) => {
   // no mesmo perfil e com as mesmas regras; sem isso, seguem abrindo na própria aba e a barra mostra "popup bloqueado".
   contents.setWindowOpenHandler(({ url, disposition }) => {
     const site = originOf(contents.getURL());
-    if (web(url) && site && SitePerms.stateOf(config?.value.settings, site, 'popups') === 'allow') {
+    // O portal da faculdade (*.cruzeirodosul.edu.br) testa window.open() e, se vier null, trava com um alert de
+    // "desabilite o bloqueador de pop-ups": por padrão libera popups desse domínio, salvo se o usuário bloqueou o site.
+    const state = site ? SitePerms.stateOf(config?.value.settings, site, 'popups') : 'ask';
+    if (web(url) && (site && state === 'allow' || state === 'ask' && trustedPopupHost(contents.getURL()) && trustedPopupHost(url))) {
       return { action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true, backgroundColor: '#ffffff', icon: path.join(__dirname, 'ui/icon.ico'), webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false } } };
     }
     if (web(url)) contents.loadURL(url);
